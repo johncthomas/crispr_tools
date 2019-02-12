@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy import stats
@@ -6,13 +7,20 @@ try:
 except ImportError:
     adjust_text = None
 
-__version__ = 'v1.2.1'
+from pathlib import Path, PosixPath, WindowsPath
+import pandas as pd
+
+__version__ = 'v1.3.0'
+
+#v1.3.0
+# Adding Mageck tab
+# fixed plot volcanos enrichment labeling
 
 #todo: sometimes lfc tables not writte, make it optional
 #todo: boxpot on the violins
 #todo: pass through non numeric columns in SFN
 #todo; pass plot_volcano a filen string and it loads the table
-#todo make plot volcano work with both
+
 
 def drop_nonumeric(tab):
     nonumeric = tab.columns[tab.iloc[0, :].apply(type) == str]
@@ -110,48 +118,125 @@ def plot_ROC(tab, things_oi, label=None):
     plt.tight_layout()
 
 
-def plot_volcano(tab, title='', label_genes=None, outfn='', ax=None, source='mageck'):
+def plot_volcano_from_mageck(tab, title='', label_genes=None, outfn='', ax=None, source='mageck'):
     """Take a mageck table and do a volcano plot. """
 
     dep = tab.loc[:, 'pos|lfc'] > 0
     enr = tab.loc[:, 'pos|lfc'] < 0
     tab.loc[dep, 'ml10_fdr'] = -np.log10(tab.loc[dep, 'pos|fdr'])
     tab.loc[enr, 'ml10_fdr'] = -np.log10(tab.loc[enr, 'neg|fdr'])
+    plot_volcano(tab['pos|lfc'], tab['ml10_fdr'], title=title, other_labels=label_genes,
+                 outfn=outfn, ax=ax)
+
+
+def plot_volcano(lfc, fdr, tab=None, title='', label_deplet=0, label_enrich=0,
+                 other_labels=None, p_thresh=0.05, outfn='', ax=None, exclude_labs = ('NonT',)):
+    """Draw a volcano plot of lfc vs fdr. assumes fdr is -log10.
+
+    :param lfc: str giving tab[lfc] or series with gene names as index
+    :param fdr: str giving tab[fdr] or series with gene names as index
+    :param tab: DataFrame containing lfc and fdr
+    :param title: optional plot title
+    :param label_enrich: int giving top n enriched genes to label
+    :param label_deplet: int giving top n depleted genes to label
+    :param other_labels: other genes to label
+    :param p_thresh:
+    :param outfn: if provided a .png will be written
+    :param ax: optional plt.Axes instance to use
+    :return: plt.Axes
+    """
+
+    if tab is not None:
+        lfc = tab[lfc]
+        fdr = tab[fdr]
+
     sctkw = dict(marker='o', linestyle='none')
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(8, 12))
-    ax.plot(tab['pos|lfc'], tab['ml10_fdr'], alpha=0.4, **sctkw)
+    ax.plot(lfc, fdr, alpha=0.4, **sctkw)
     # plt.yscale('log')
     # plt.gca().invert_yaxis()
     ax.set_title(title)
 
     xmin, xmax, ymin, ymax = ax.axis()
-    ax.plot([xmin, xmax], [-np.log10(0.05), -np.log10(0.05)], 'k--')
+
+    p_thresh = -np.log10(p_thresh)
+    ax.plot([xmin, xmax], [p_thresh, p_thresh], 'k--')
     ax.plot([0, 0], [ymin, ymax], color='silver')
-    if label_genes is not None:
+    # label the top and bottom most, if specified
+    texts = []
+    texts_done = []
+    # get subtables
 
-        if type(label_genes) is int:
-            ngoi = label_genes
-            label_genes = list(tab.sort_values(['neg|fdr', 'neg|lfc']).index[:ngoi]) \
-                          + list(tab.sort_values(['pos|fdr', 'pos|lfc'], ascending=[True, False]).index[:ngoi])
-            label_genes = [gn for gn in label_genes if tab.loc[gn, 'neg|fdr'] < 0.05 or tab.loc[gn, 'pos|fdr'] < 0.05]
+    filtered_lfc = lfc.copy()
+    for exclude in exclude_labs:
+        filtered_lfc = filtered_lfc.loc[~filtered_lfc.index.str.contains(exclude)]
 
-        texts = []
-        if adjust_text is not None:
-            for gene in label_genes:
-                goix, goiy = tab.loc[gene, 'pos|lfc'], tab.loc[gene, 'ml10_fdr']
-                tx = ax.text(goix, goiy, gene)
-                ax.plot(goix, goiy, color='orange', **sctkw)
-                texts.append(tx)
-            adjust_text(texts, arrowprops=dict(arrowstyle='->', color='red'))
+    depmask = lfc < 0
+    enrmask = lfc > 0
+    # ascending order by default
+    dep = fdr[depmask].sort_values().tail(label_deplet)
+    enr = fdr[enrmask].sort_values().tail(label_enrich)
+
+    for end in dep, enr:
+        for lab, an_fdr in end.items():
+            if an_fdr < p_thresh:
+                continue
+            texts_done.append(lab)
+            texts.append(plt.text(lfc[lab], fdr[lab], lab))
+    # label additional genes
+    if other_labels:
+        for lab in other_labels:
+            if lab in texts_done:
+                continue
+            texts.append(
+                plt.text(lfc[lab], fdr[lab], lab)
+            )
+
+    if texts:
+        adjust_text(texts, arrowprops=dict(arrowstyle='->', color='red'))
 
     ax.set_xlabel('Log$_2$ Fold Change')
     ax.set_ylabel('-log$_{10}$(FDR)')
 
-    if not outfn:
-        return ax
     if outfn:
-        plt.savefig(outfn)
+        plt.tight_layout()
+        plt.savefig(outfn, dpi=150)
+    return ax
+
 
 revcomp = lambda s: ''.join([dict(zip('ACTGN', 'TGACN'))[nt] for nt in s[::-1]])
 
+
+def tabulate_mageck(prefix):
+    """
+    :param prefix: Input file prefix, including path
+    :return: pd.DataFrame
+    """
+    prefix = Path(prefix)
+    tables = {}
+    tab = None
+    for fn in os.listdir(prefix.parent):
+        if not fn.endswith('.gene_summary.txt') or \
+                prefix.parts[-1] not in fn:
+            continue
+        #mtab from the mageck output, reformatted into tab
+        mtab = pd.read_csv(prefix.parent / fn, '\t', index_col=0)
+        tab = pd.DataFrame(index=mtab.index)
+        tab.loc[:, 'lfc'] = mtab.loc[:, 'neg|lfc']
+        # turn sep pos|neg columns into one giving only the appropriate LFC/FDR
+        pos = mtab['pos|lfc'] > 0
+        tab.loc[pos, 'fdr'] = mtab.loc[pos, 'pos|fdr']
+        tab.loc[~pos, 'fdr'] = mtab.loc[~pos, 'neg|fdr']
+        tab.loc[:, 'fdr_log10'] = tab.fdr.apply(lambda x: -np.log10(x))
+
+        sampnm = fn.split(prefix.stem)[1].split('.gene_s')[0]
+        tables[sampnm] = tab
+    if tab is None:
+        raise FileNotFoundError('Failed to find any .gene_summary.txt files with prefix '+str(prefix))
+    tbcolumns = pd.MultiIndex.from_product([sorted(tables.keys()), ['lfc', 'fdr', 'fdr_log10']],
+                                           1)
+    table = pd.DataFrame(index=tab.index, columns=tbcolumns)
+    for exp, tab in tables.items():
+        table[exp] = tab
+    return table

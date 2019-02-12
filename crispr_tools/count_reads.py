@@ -1,10 +1,16 @@
+#!Python3
 import os, sys
 from collections import Counter
 import gzip
 import argparse
-from pathlib import Path
+from pathlib import Path, PosixPath, WindowsPath
 
-__version__ = '1.2.4'
+from typing import List
+
+__version__ = '1.3.1b1'
+
+# 1.3.1 returned column order of map_counts now 'guide', 'gene', [everything else]
+# v1.3.0 added map_counts
 # v1.2.4 added printed info explaining sample merges.
 # v1.2.3 changed func name to count_reads, added import to __init__, renamed to crispr_tools
 # v1.2.2 bugfixes, started using pathlib, reimplimented ability to pass dir
@@ -16,6 +22,7 @@ __version__ = '1.2.4'
 
 #todo just ouput a single file what
 #todo use **kwargs to pass parsed args to count_batch
+#todo use logging instead of stealing print
 
 
 def count_reads(fn, slicer=(None, None), s_len=None, s_offset=0, ):
@@ -56,19 +63,46 @@ def count_reads(fn, slicer=(None, None), s_len=None, s_offset=0, ):
         print(failed_count, 'sequences did not contain subsequence')
     return seqs
 
-def count_batch(files, slicer, fn_prefix='', seq_len=None, seq_offset=0, fn_suffix='rawcount',
+def get_file_list(files_dir) -> List[os.PathLike]:
+    """Pass single string or list of stings, strings that are files go on the
+    file list, directories will have all files within (not recursive) will be
+    added to the file list.
+
+    A list of Path obj are returned."""
+
+    file_list = []
+    # just in case trying to make a list of a single string...
+    if type(files_dir) in (str, PosixPath, WindowsPath):
+        files_dir = [files_dir]
+    # convert to Path
+    files = [Path(f) for f in files_dir]
+    # get single list of Path, containing all listed files and files in listed dir
+    # dir within `files` will be ignored.
+    for fndir in files:
+        if os.path.isdir(fndir):
+            for fn in os.listdir(fndir):
+                fn = fndir/fn
+                if os.path.isfile(fn):
+                    file_list.append(fn)
+        else:
+            file_list.append(fndir)
+    file_list = [fn for fn in file_list if fn.name[0] != '.']
+    return file_list
+
+
+def count_batch(fn_or_dir, slicer, fn_prefix='', seq_len=None, seq_offset=0, fn_suffix='rawcount',
                 fn_split='_R1_', merge_samples=False, just_go=False, quiet=False,
                 allowed_extensions = ('.fastq', 'fastq.gz', '.fq')):
     """Write a table giving the frequency of all unique sequences from a fastq
     files (or fastq.gz).
 
-    Output filenames are derived from input filenames.
+    Output filenames are derived from input filenames. Outfn are returned.
 
     Merge_samples looks for file names containing "_L001_" and assumes all
     files with the same prefix are the same sample.
 
     Arguments:
-        files:
+        fn_or_dir:
             A list of files or dir. All files in given dir that end
             with .fastq or .fastq.gz or .fq will be counted.
 
@@ -98,7 +132,7 @@ def count_batch(files, slicer, fn_prefix='', seq_len=None, seq_offset=0, fn_suff
 
         allowed_extensions  ('fastq', 'fastq.gz', '.fq')
     """
-
+    global print
     if quiet:
         print = lambda x: None
         just_go = True
@@ -106,19 +140,7 @@ def count_batch(files, slicer, fn_prefix='', seq_len=None, seq_offset=0, fn_suff
         print = print
 
     # accepts list of mixed files and dir, ends up as list of files
-    file_list = []
-    if type(files) is str:
-        files = [files]
-    files = [Path(f) for f in files]
-    for fndir in files:
-        if fndir.is_dir():
-            for fn in os.listdir(fndir):
-                # some syntactic sugar from pathlib
-                fn = fndir / fn
-                if os.path.isfile(fn):
-                    file_list.append(fn)
-        else:
-            file_list.append(fndir)
+    file_list = get_file_list(fn_or_dir)
 
     # filter the file list
     # strings are easier to work with at this point
@@ -161,34 +183,107 @@ def count_batch(files, slicer, fn_prefix='', seq_len=None, seq_offset=0, fn_suff
         with open(outfn, 'w') as f:
             for s, n in a_cnt.most_common():
                 f.write('{}\t{}\n'.format(s,n))
+        return outfn
+    # used if library mapping being done
+    out_files = []
 
     # main loop(s)
     if merge_samples:
-        for samp, files in file_dict.items():
+        for samp, fn_or_dir in file_dict.items():
             cnt = Counter()
-            for fn in files:
+            for fn in fn_or_dir:
                 cnt += count_reads(fn, slicer, seq_len, seq_offset)
-            write_count(cnt, samp)
+            out_files.append(
+                write_count(cnt, samp)
+            )
     else:
         for fn in file_list:
             cnt = count_reads(fn, slicer, seq_len, seq_offset)
-            write_count(cnt, fn.split(fn_split)[0].split('/')[-1])
+            out_files.append(
+                write_count(cnt, fn.split(fn_split)[0].split('/')[-1])
+            )
+
+    return out_files
+
+def map_counts(fn_or_dir, lib, guidehdr='guide', genehdr='gene',
+               drop_unmatched=False, report=False, splitter='.raw',
+               out_fn=None):
+    """lib needs to be indexed by guide sequence. If it's not a DF a DF will
+    be created and indexed by 'seq' or the first column. Returns a DF indexed
+    by 'guide' with 'gene' as the second column.
+
+    """
+
+    import pandas as pd
+    if type(lib) in (str, PosixPath, WindowsPath):
+        lib = str(lib)
+        if lib.endswith('.csv'):
+            sep = ','
+        else:
+            sep = '\t'
+        lib = pd.read_csv(lib, sep)
+        if 'seq' in lib.columns:
+            lib.set_index('seq', drop=False, inplace=True)
+        else:
+            lib.set_index(lib.columns[0])
+
+    # write a single table
+    file_list = get_file_list(fn_or_dir)
+    file_list = [f for f in file_list if splitter in str(f)]
+    print(file_list)
+    rawcnt = pd.DataFrame()
+
+    # get single table of counts
+    for fn in file_list:
+        # filtering of fn done before here
+        rawcnt.loc[:, fn.name.split(splitter)[0]] = pd.read_table(fn, index_col=0, header=None).iloc[:, 0]
+
+    rawcnt = rawcnt.fillna(0).astype(int)
+    # the abscent guides
+    missing = lib.loc[~lib.index.isin(rawcnt.index), :].index
+
+    # get the present guides
+    matches = rawcnt.loc[rawcnt.index.isin(lib.index), :].index
+    if report:
+        prop = rawcnt.loc[matches, :].sum().sum()/rawcnt.sum().sum()
+        print("{:.3}% of reads map.".format(prop*100))
+        print("{:.3}% ({}) of library guides not found.".format(
+            missing.shape[0] / lib.shape[0] *100, missing.shape[0]
+        ))
+    #cnt = rawcnt.loc[matches, :].copy()
+    rawcnt.loc[matches, 'guide'] = lib.loc[matches, guidehdr]
+    rawcnt.loc[matches, 'gene'] = lib.loc[matches, genehdr]
+
+    missingdf = pd.DataFrame(index=missing, columns=rawcnt.columns)
+    missingdf.loc[:, :] = 0
+    missingdf.loc[missing, 'guide'] = lib.loc[missing, guidehdr]
+    missingdf.loc[missing, 'gene'] = lib.loc[missing, genehdr]
+    rawcnt = rawcnt.append(missingdf)
+
+    if drop_unmatched:
+        cnt = rawcnt.loc[lib.index, :].copy()
+    else:
+        cnt = rawcnt
+
+    # sort out columns
+    cols = list(cnt.columns)
+    cnt = cnt.reindex([guidehdr, genehdr] + cols[1:-2], axis='columns',)
+    cnt.set_index(guidehdr, inplace=True)
+
+    if out_fn:
+        cnt.to_csv(out_fn, sep='\t')
+    return cnt
 
 
-        # # merge lanes if required
-        # # iteratively look for files containing _L002_, _L003_, etc
-        # lane_i = 2
-        # while merge_lanes:
-        #     next_fn = fn.replace('_L001_', '_L{0:03d}_'.format(lane_i))
-        #     if os.path.isfile(next_fn):
-        #         cnt += count_seqs(next_fn, slicer)
-        #     else: # if the next file doesn't exist, we are done.
-        #         break
-        #     lane_i += 1
-
-        # build output filename and write
 
 
+
+# os.chdir('/Users/johnc.thomas/thecluster/jct61/counts/nomask')
+# map_counts(
+#     'tst', '/Users/johnc.thomas/thecluster/jct61/crispr_libraries/Kinase_gRNA_library_no_duplicates.csv',
+#     drop_unmatched=True, report=True, out_fn='tst/tstout2.tsv'
+#
+# )
 
 if __name__ == '__main__':
     print('v', __version__)
@@ -203,15 +298,25 @@ if __name__ == '__main__':
     parser.add_argument('-p', default='', metavar='FN_PREFIX',
                         help="Prefix added to output files, can include absolute or relative paths.")
     parser.add_argument('--fn-split', default='_R1_', metavar='STR',
-                        help="String used to split filenames and form output file prefix. Default `_R1_`. Doesn't do anything if --merge-samples is used.")
+                        help="String used to split filenames and form output file prefix. Default `_R1_`." \
+                             "Doesn't do anything if --merge-samples is used.")
     parser.add_argument('--merge-samples', action='store_true', default=False,
                         help="Merge counts from files with identical sample names. Be careful not to double count decompressed & compressed files.")
     parser.add_argument('--just-go', action='store_true', default=False, help="Don't wait for confirmation.")
     parser.add_argument('--quiet', action='store_true', default=False, help="Don't print helpful messages, enables --just-go.")
+    parser.add_argument('--library', default=None, metavar='LIB_PATH',
+                        help="Pass a library file and a single mapped reads count file will be output with" \
+                             "the name [FN_PREFIX].counts.tsv")
     clargs = parser.parse_args()
 
     # slices list of input files, or dir
     slicer = [int(n) for n in clargs.s.split(',')]
 
-    count_batch(clargs.files, slicer, clargs.p, None, 0, clargs.f, clargs.fn_split, clargs.merge_samples, clargs.just_go, clargs.quiet)
+    written_fn = count_batch(clargs.files, slicer, clargs.p, None, 0, clargs.f, clargs.fn_split, clargs.merge_samples,
+                clargs.just_go, clargs.quiet)
+    if clargs.library:
+        map_counts(written_fn, clargs.library, drop_unmatched=True, report=True,
+                   out_fn=clargs.p+'.counts.tsv')
+
+
 
