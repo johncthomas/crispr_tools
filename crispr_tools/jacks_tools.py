@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import pandas as pd
+from typing import Union
 #import pickle
 from scipy.stats import norm
 from statsmodels.stats.multitest import multipletests
@@ -11,15 +12,15 @@ except ModuleNotFoundError:
     def adjust_text(*args, **kwargs):
         pass
 
-__version__ = '0.5'
+__version__ = '0.6'
 
 #todo: sepfucntions for each table, one function that calls all, option to only return scores
 #todo subclass scores_table from DF, add functions as methods, plots, mahal, scores etc
-#todo: tabulate generates best fdr by default
 #todo: put eff and fold change on the same table (currently nans)
 #todo pass ax to plot2d
 #todo bootstrapping?
 #todo: write decent readme and documention for github
+#todo make scores scatterplot work with other distance methods
 
 # in 0.5
 # refactor "esstab" to "score_table"
@@ -97,20 +98,28 @@ def plot_volcano_from_scoretable(score_table, savefn=None, ax=None,
         return ax
 
 
-def scores_scatterplot(x, y, table=None, min_mahal:float=False, label_mahal=False,
-                  labels=None, formatters=None, ):
+def scores_scatterplot(x, y, table=None, min_mahal:float=False,
+                       label_mahal:Union[int, bool]=False,
+                        labels=None, formatters=None, ):
     """Produce biplot of 2 essentiality series.
     args:
         x, y:
-            str that point to score sub-table column labels, or
+            str that point to column labels, or
             pd.Series with shared index that gives x and y values
             to be plotted.
 
         table:
-            Score table from .tabulate(), subtables selected with x/y_score
+            Score table from e.g. .tabulate_scores() (optional)
 
         labels:
             list of gene names to be labeled on the plot
+
+        min_mahal:
+            minimum distance to colour points
+
+        label_mahal:
+            True to label all points > min_mahal, pass an int to label the
+            top N furthest points.
 
         formatters:
             list of tuples as below. format_dict is passed to
@@ -138,6 +147,7 @@ def scores_scatterplot(x, y, table=None, min_mahal:float=False, label_mahal=Fals
         max_mahal = max(mahal)
         #print(max_mahal)
         # normalised mahaladonis for color scaling
+        # Anything > 0 will go on labels_maybe
         nmahal = (mahal-min_mahal)/(max_mahal-min_mahal)
         colrs = cm.viridis(nmahal) # loses the gene name indicies
         labels_maybe = []
@@ -153,6 +163,9 @@ def scores_scatterplot(x, y, table=None, min_mahal:float=False, label_mahal=Fals
         colrs = None
 
     if label_mahal:
+        if type(label_mahal) is int:
+            topdist = mahal.sort_values().tail(label_mahal)
+            labels_maybe = [l for l in labels_maybe if l in topdist.index]
         if labels:
             labels.extend(labels_maybe)
         else:
@@ -359,3 +372,41 @@ def mahal_nocov(ols, xs, xs_sd, ys, ys_sd, **cp_kwargs):
 
 
 
+
+#from jacks_tools import *
+from crispr_tools import *
+import os
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import scipy.stats as stats
+
+revcomp = lambda s: ''.join([dict(zip('ACTGN', 'TGACN'))[nt] for nt in s[::-1]])
+import logging
+
+pltlogger = logging.getLogger('matplotlib')
+pltlogger.setLevel(logging.WARNING)
+
+from pathlib import Path, PosixPath, WindowsPath
+import pandas as pd
+from typing import List
+
+os.chdir('/Users/johnc.thomas/Dropbox/crispr/screens_analysis/matylda_HS715-20/')
+#jtabs = {k:tab for k, tab in zip(['d2', 'pre', 'nt'], [tablulate_score('take3/jacks_mode/files/{}'.format(x) for x in ('D2.', 'pretreat.', 'NT.')])}
+
+jtabs = {'D2':tablulate_score('take2/jacks_results/files/matylda_HS715-20.D2.'),
+        'pretreat':tablulate_score('take2/jacks_results/files/matylda_HS715-20.pretreat.'),
+        'NT':tablulate_score('take2/jacks_results/files/matylda_HS715-20.NT.')}
+jtabs['NT'].head()
+comptab = pd.read_csv('comparisons.csv', index_col=0)
+tab = jtabs['pretreat']
+for samp, comps in comptab.iterrows():
+    if comps.comp is not np.NaN:
+        comps = comps.comp.split('|')
+        for comp in comps:
+            if comp not in tab.columns or samp not in tab.columns:
+                continue
+            scores_scatterplot(comp, samp, tab, min_mahal = 1, label_mahal=np.inf)
+            plt.show()
+            break
