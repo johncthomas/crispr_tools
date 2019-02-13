@@ -57,7 +57,7 @@ def size_factor_normalise(cnt_tab, log=True):
     return norm_tab
 
 
-def plot_read_violins(tab, column_labs=None, log=True, size_norm=False, ax=None):
+def plot_read_violins(tab, column_labs=None, n_per_row=0, log=True, size_norm=False, ax=None):
     """Takes counts table, does log2 (optionally size factor normalises)
     and produces violin density plots.
 
@@ -145,8 +145,10 @@ def plot_volcano(lfc, fdr, tab=None, title='', label_deplet=0, label_enrich=0,
     :param ax: optional plt.Axes instance to use
     :return: plt.Axes
     """
-
+    lfc_lab, fdr_lab = None, None
     if tab is not None:
+        lfc_lab = lfc
+        fdr_lab = fdr
         lfc = tab[lfc]
         fdr = tab[fdr]
 
@@ -168,13 +170,22 @@ def plot_volcano(lfc, fdr, tab=None, title='', label_deplet=0, label_enrich=0,
     texts_done = []
     # get subtables
 
+    # filter out excluded labels by getting Series containing only included labs,
+    # turn that into a mask of the original series and combining that with the dep/enr masks.
     filtered_lfc = lfc.copy()
-    for exclude in exclude_labs:
-        filtered_lfc = filtered_lfc.loc[~filtered_lfc.index.str.contains(exclude)]
+    if exclude_labs:
+        for exclude in exclude_labs:
+            filtered_lfc = filtered_lfc.loc[~filtered_lfc.index.str.contains(exclude)]
 
-    depmask = lfc < 0
-    enrmask = lfc > 0
-    # ascending order by default
+        included = lfc.index.isin(filtered_lfc.index)
+        depmask = (lfc < 0) & included
+        enrmask = (lfc > 0) & included
+    else:
+        depmask = (lfc < 0)
+        enrmask = (lfc > 0)
+
+
+    # get tails from ascending order
     dep = fdr[depmask].sort_values().tail(label_deplet)
     enr = fdr[enrmask].sort_values().tail(label_enrich)
 
@@ -196,7 +207,11 @@ def plot_volcano(lfc, fdr, tab=None, title='', label_deplet=0, label_enrich=0,
     if texts:
         adjust_text(texts, arrowprops=dict(arrowstyle='->', color='red'))
 
-    ax.set_xlabel('Log$_2$ Fold Change')
+    if lfc_lab is None:
+        ax.set_xlabel('Log$_2$ Fold Change')
+    else:
+        ax.set_xlabel(lfc_lab)
+
     ax.set_ylabel('-log$_{10}$(FDR)')
 
     if outfn:
