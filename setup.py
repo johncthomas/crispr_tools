@@ -3,7 +3,7 @@ from os import path
 
 setup(
     name = 'crispr_tools',
-    version = '1.7.3b1',
+    version = '1.7.3b2',
     author = 'John C. Thomas',
     author_email = 'jcthomas000@gmail.com',
     packages=find_packages(exclude=['contrib', 'docs', 'tests']),

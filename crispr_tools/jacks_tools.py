@@ -99,7 +99,7 @@ def plot_volcano_from_scoretable(score_table, savefn=None, ax=None,
 
 
 
-def scores_scatterplot(x, y, table=None, mahal_grandient=True, label_pos=0, label_neg=0,
+def scores_scatterplot(x, y, table=None, mahal_gradient=True, label_pos=0, label_neg=0,
                        labels=None, formatters:List[dict]=None, ax=None):
     """Produce biplot of 2 essentiality series.
     args:
