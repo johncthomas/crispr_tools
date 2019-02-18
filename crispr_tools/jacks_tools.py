@@ -114,7 +114,7 @@ def scores_scatterplot(x, y, table=None, mahal_gradient=True, label_pos=0, label
         labels:
             list of gene names to be labeled on the plot
 
-        mahal_grandient:
+        mahal_gradient:
             if True points will be colored by mahal value.
 
         label_top, label_bot:
@@ -141,7 +141,7 @@ def scores_scatterplot(x, y, table=None, mahal_gradient=True, label_pos=0, label
         labels = []
 
     pos_genes, neg_genes = [], []
-    if mahal_grandient:
+    if mahal_gradient:
         _, _, mahal = mahal_nocov(
             FakeOLS(1,0), x_score, table[x].stdev, y_score, table[y].stdev
         )
