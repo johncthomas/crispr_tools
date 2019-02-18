@@ -130,7 +130,8 @@ def plot_volcano_from_mageck(tab, title='', label_genes=None, outfn='', ax=None,
 
 
 def plot_volcano(lfc, fdr, tab=None, title='', label_deplet=0, label_enrich=0,
-                 other_labels=None, p_thresh=0.05, outfn='', ax=None, exclude_labs = ('NonT',)):
+                 other_labels=None, p_thresh=0.05, outfn='', ax=None,
+                 exclude_labs = ('NonT', 'Rando')):
     """Draw a volcano plot of lfc vs fdr. assumes fdr is -log10.
 
     :param lfc: str giving tab[lfc] or series with gene names as index

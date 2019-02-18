@@ -4,6 +4,7 @@ import argparse
 from subprocess import call
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
@@ -17,6 +18,7 @@ from crispr_tools.count_reads import count_reads, count_batch, map_counts
 from crispr_tools.tools import plot_read_violins, plot_ROC, plot_volcano, tabulate_mageck, plot_volcano_from_mageck
 from crispr_tools.jacks_tools import tablulate_score, tabulate_jacks, plot_volcano_from_scoretable, scores_scatterplot
 
+__version__ = '1.7.2b5'
 
 #todo fix chart titles for mag volc, and x title for jacks volc
 
@@ -27,7 +29,7 @@ from crispr_tools.jacks_tools import tablulate_score, tabulate_jacks, plot_volca
 
 
 """Go from FastQ files to completed JACKS/MAGeCK analysis. 
-fq->mapped_counts&violin plots are one command 
+fq->mapped_counts&violin plots are one command (count_reads.count_batch() ) 
 counts->charts&tables another."""
 
 mageck_str = "mageck test -k {counts} -t {treat} -c {ctrl} -n {outprefix}{ctrlnm}-{sampnm}"
@@ -80,14 +82,21 @@ def run_analysis(fn_counts, fn_repmap, outdir, file_prefix, labeldep = 30, label
     #     input('Output directory '+outdir+' already exists.\nPress enter to overwrite any existing results...')
     call(['mkdir', outdir])
 
-    for resd in ('jacks_mode', 'jacks_median', 'mageck'):
-        call(['mkdir', str(Path(outdir, resd))])
-        call(['mkdir', str(Path(outdir, resd, 'charts'))])
-        call(['mkdir', str(Path(outdir, resd, 'tables'))])
-        call(['mkdir', str(Path(outdir, resd, 'files'))])
+    for analysis in ('jacks_mode', 'jacks_median', 'mageck'):
+        call(['mkdir', str(Path(outdir, analysis))])
+        call(['mkdir', str(Path(outdir, analysis, 'volcano'))])
+        call(['mkdir', str(Path(outdir, analysis, 'scatter'))])
+        call(['mkdir', str(Path(outdir, analysis, 'tables'))])
+        call(['mkdir', str(Path(outdir, analysis, 'files'))])
+        #call(['mkdir', str(Path(outdir, 'scattercharts'))])
 
     xl = pd.ExcelFile(fn_repmap)
-    for ctrlgroup in xl.sheet_names:
+    if 'repmaps' in xl.sheet_names:
+        ctrls = xl.parse('repmaps', header=None).iloc[:, 0].values
+    else:
+        ctrls = [s for s in xl.sheet_names if any([x in s for x in('D2', 'pre', 'NT', 'DMSO')])]
+    print('control groups:' , ctrls)
+    for ctrlgroup in ctrls:
         fnprefix = file_prefix + '.' + ctrlgroup + '.'
         jmode_prefix = str(Path(outdir, 'jacks_mode', 'files', fnprefix))
         jmed_prefix = str(Path(outdir, 'jacks_median', 'files', fnprefix))
@@ -135,27 +144,54 @@ def run_analysis(fn_counts, fn_repmap, outdir, file_prefix, labeldep = 30, label
 
         #volcano charts of all
         # use the universal one, have label options as part of args, maybe as a dict.
-        for annm, xkey, tab in ('jacks_mode', 'jacks_score',  scoresmode), \
+        for analysis, xkey, tab in ('jacks_mode', 'jacks_score',  scoresmode), \
                                ('jacks_median', 'jacks_score', scoresmed), \
                                ('mageck', 'lfc', magtab):
-            resd = annm
+            analysis = analysis
             for exp in tab.columns.levels[0]:
-                if annm.startswith('jacks'):
-                    chart_title = '{} vs {} ({} normalisation)'.format(exp, ctrlgroup, annm)
+                if analysis.startswith('jacks'):
+                    chart_title = '{} from {} ({} normalisation)'.format(exp, ctrlgroup, analysis)
                 else:
                     ctrlnm, treatnm = exp.split('-')
-                    chart_title = '{} vs {} ({} analysis)'.format(treatnm, ctrlnm, annm)
-
+                    chart_title = '{} from {} ({} analysis)'.format(treatnm, ctrlnm, analysis)
                 plot_volcano(
                     xkey, 'fdr_log10', tab[exp], chart_title,
                     labeldep,labelenr,p_thresh=0.1,
-                    outfn=str(Path(outdir, resd, 'charts', fnprefix+exp+'.'+annm+'_volcano.png'))
+                    outfn=str(Path(outdir, analysis, 'volcano', fnprefix+exp+'.'+analysis+'_volcano.png'))
                 )
                 plt.close()
 
-            call(['tar', '-zcf', str(Path(outdir, resd+'_charts.tar.gz')) ,str(Path(outdir, resd, 'charts'))])
+            call(['tar', '-zcf', str(Path(outdir, analysis+'volcano_charts.tar.gz')) ,str(Path(outdir, analysis, 'volcano'))])
+
+        #scattercharts using comparisons.csv
+        try:
+            #compstr = [s for s in xl.sheet_names if s.lower().startswith('comp')][0]
+            comptab = xl.parse('sample_deets', index_col=0)
+            if 'comps' not in comptab.columns:
+                raise ValueError
+        except:
+            print('** No comparisons')
+            continue
+        for analysis, tab in ('jacks_mode', scoresmode), ('jacks_median', scoresmed):
+            for samp, comps in comptab.iterrows():
+                if comps.comps is not np.NaN:
+                    comps = comps.comps.replace(' ', '').split(',')
+                    for comp in comps:
+                        if comp not in tab.columns or samp not in tab.columns:
+                            continue
+                        scores_scatterplot(comp, samp, tab, min_mahal=0.5, label_mahal=40)
+                        plt.savefig(str(
+                            Path(outdir, analysis, 'volcano', fnprefix+"{}_vs_{}.scatter.png".format(comp, samp))
+                        ), dpi=150)
+                        plt.close()
+            # wipes over the one produced above if comptab exists.
+            call(['tar', '-zcf', str(Path(outdir, analysis + 'scatter_charts.tar.gz')), str(Path(outdir, analysis, 'scatter'))])
 
 if __name__ == '__main__':
+
+
+
+    print(__version__)
     parser = argparse.ArgumentParser(description='Run mageck and jacks analyses using a repmap.xlsx and'
                                      " counts.tsv")
     parser.add_argument('fn_counts', metavar='COUNTS', help='Path to counts file')
@@ -170,5 +206,5 @@ if __name__ == '__main__':
     parser.add_argument('--charts-only', action='store_true', default=False,
                         help="Don't run MAGeCK or JACKS, just produce plots with existing files.")
     clargs = parser.parse_args()
-    #print(vars(clargs))
+
     run_analysis(**vars(clargs))

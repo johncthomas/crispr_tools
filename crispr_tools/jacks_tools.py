@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import pandas as pd
-from typing import Union
+from typing import Union, List, Dict, Tuple
 #import pickle
 from scipy.stats import norm
 from statsmodels.stats.multitest import multipletests
@@ -98,9 +98,9 @@ def plot_volcano_from_scoretable(score_table, savefn=None, ax=None,
         return ax
 
 
-def scores_scatterplot(x, y, table=None, min_mahal:float=False,
-                       label_mahal:Union[int, bool]=False,
-                        labels=None, formatters=None, ):
+
+def scores_scatterplot(x, y, table=None, mahal_grandient=True, label_pos=0, label_neg=0,
+                       labels=None, formatters:List[dict]=None, ax=None):
     """Produce biplot of 2 essentiality series.
     args:
         x, y:
@@ -114,21 +114,21 @@ def scores_scatterplot(x, y, table=None, min_mahal:float=False,
         labels:
             list of gene names to be labeled on the plot
 
-        min_mahal:
-            minimum distance to colour points
+        mahal_grandient:
+            if True points will be colored by mahal value.
 
-        label_mahal:
-            True to label all points > min_mahal, pass an int to label the
-            top N furthest points.
+        label_top, label_bot:
+            Pass an int or True to label the most distant top or bottom points.
 
         formatters:
             list of tuples as below. format_dict is passed to
             plt.plot(..., **format_dict).
                 [(list_of_genes, format_dict), ...]
 
-    Formatters"""
-
-    fig, ax = plt.subplots(1, 1, figsize=(8,8))
+    returns fig, ax if ax=None, otherwise the supplied ax is returnd."""
+    fig=None
+    if ax is None:
+        fig, ax = plt.subplots(1, 1, figsize=(8,8))
 
     if table is None:
         x_score = x
@@ -137,40 +137,47 @@ def scores_scatterplot(x, y, table=None, min_mahal:float=False,
         x_score = table[x].jacks_score
         y_score = table[y].jacks_score
 
-    if min_mahal is not False:
+    if labels is None:
+        labels = []
+
+    pos_genes, neg_genes = [], []
+    if mahal_grandient:
         _, _, mahal = mahal_nocov(
             FakeOLS(1,0), x_score, table[x].stdev, y_score, table[y].stdev
         )
 
-        # for this we don't care about pos/neg
-        mahal = mahal.abs()
+        # get the genes to be labelled first
+        mahal = mahal.sort_values()
+        # get most distance in the pos and neg directions
+        if label_pos is True:
+            label_pos = np.inf
+        if label_neg is True:
+            label_neg = np.inf
+        pos_genes = mahal.tail(label_pos).index
+        neg_genes = mahal.head(label_neg).index
+
+        # for grandient we don't care about pos/neg
+        # but we do want the order to match x_score as the index will be lost
+        mahal = mahal.reindex(x_score.index).abs()
         max_mahal = max(mahal)
-        #print(max_mahal)
+
         # normalised mahaladonis for color scaling
-        # Anything > 0 will go on labels_maybe
+        min_mahal = 0
         nmahal = (mahal-min_mahal)/(max_mahal-min_mahal)
         colrs = cm.viridis(nmahal) # loses the gene name indicies
-        labels_maybe = []
         # RGBA
         grey = (0.68, 0.68, 0.68, 1)
         for i, m in enumerate(nmahal):
             # m == mahal-minmahal
             if m < 0:
                 colrs[i] = grey
-            else:
-                labels_maybe.append(nmahal.index[i])
+
     else:
         colrs = None
 
-    if label_mahal:
-        if type(label_mahal) is int:
-            topdist = mahal.sort_values().tail(label_mahal)
-            labels_maybe = [l for l in labels_maybe if l in topdist.index]
-        if labels:
-            labels.extend(labels_maybe)
-        else:
-            labels = labels_maybe
-
+    labels.extend(pos_genes)
+    labels.extend(neg_genes)
+    print(labels)
     if not formatters:
         # all genes with empty format spec
         formatters = [(x_score.index, {})]
@@ -210,8 +217,10 @@ def scores_scatterplot(x, y, table=None, min_mahal:float=False,
 
     adjust_text(txt, arrowprops=dict(arrowstyle='->'))
 
-
-    return fig, ax
+    if fig is not None:
+        return ax
+    else:
+        return fig, ax
 
 
 def tablulate_score(prefix):
