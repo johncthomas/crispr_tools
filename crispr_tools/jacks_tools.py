@@ -100,7 +100,7 @@ def plot_volcano_from_scoretable(score_table, savefn=None, ax=None,
 
 
 def scores_scatterplot(x, y, table=None, mahal_gradient=True, label_pos=0, label_neg=0,
-                       labels=None, formatters:List[dict]=None, ax=None):
+                       labels=None, formatters:List[dict]=None, ax=None) -> plt.Axes:
     """Produce biplot of 2 essentiality series.
     args:
         x, y:
@@ -143,7 +143,7 @@ def scores_scatterplot(x, y, table=None, mahal_gradient=True, label_pos=0, label
     pos_genes, neg_genes = [], []
     if mahal_gradient:
         _, _, mahal = mahal_nocov(
-            FakeOLS(1,0), x_score, table[x].stdev, y_score, table[y].stdev
+            x_score, table[x].stdev, y_score, table[y].stdev
         )
 
         # get the genes to be labelled first
@@ -162,7 +162,10 @@ def scores_scatterplot(x, y, table=None, mahal_gradient=True, label_pos=0, label
         max_mahal = max(mahal)
 
         # normalised mahaladonis for color scaling
-        min_mahal = 0
+        if mahal_gradient is True:
+            min_mahal = 0
+        else:
+            min_mahal = mahal_gradient
         nmahal = (mahal-min_mahal)/(max_mahal-min_mahal)
         colrs = cm.viridis(nmahal) # loses the gene name indicies
         # RGBA
@@ -171,13 +174,12 @@ def scores_scatterplot(x, y, table=None, mahal_gradient=True, label_pos=0, label
             # m == mahal-minmahal
             if m < 0:
                 colrs[i] = grey
-
     else:
         colrs = None
 
     labels.extend(pos_genes)
     labels.extend(neg_genes)
-    print(labels)
+    #print(labels)
     if not formatters:
         # all genes with empty format spec
         formatters = [(x_score.index, {})]
@@ -208,14 +210,26 @@ def scores_scatterplot(x, y, table=None, mahal_gradient=True, label_pos=0, label
     # label significants and control
     if labels:
         for lab in set(labels):
-            txt.append(plt.text(x_score[lab], y_score[lab], lab))
+            #txt.append(plt.text(x_score[lab], y_score[lab], lab))
+            txt.append(
+                plt.annotate(
+                    lab,
+                    (x_score[lab], y_score[lab]),
+                    bbox=dict(boxstyle='round,pad=0.1', fc='yellow', alpha=0.3),
+                    arrowprops=dict(arrowstyle='->')
+                )
+            )
 
     # label axes
     if table is not None:
         plt.xlabel(x+' JACKS score')
         plt.ylabel(y + ' JACKS score')
 
-    adjust_text(txt, arrowprops=dict(arrowstyle='->'))
+    avoid_points = True if mahal_gradient is True else False
+    if avoid_points:
+        adjust_text(txt, x_score, y_score, )
+    else:
+        adjust_text(txt, expand_text=(1.1, 1.2), )
 
     if fig is not None:
         return ax
@@ -264,8 +278,7 @@ def tablulate_score(prefix):
 
         sig_df.loc[:, (exp, 'fdr_log10')] = score_table['fdr_log10'].apply(lambda x: -np.log10(x))
         # put the columns in a good order
-        sig_df = sig_df.reindex(['jacks_score', 'fdr_log10', 'stdev'],
-                       axis=1, level=1, )
+        sig_df = sig_df.reindex(['jacks_score', 'fdr_log10', 'stdev'], axis=1, level=1, )
     return sig_df
 
 def tabulate_jacks(prefix):
@@ -356,8 +369,18 @@ def closest_point(ols, xs, ys, verbose=False):
     return np.array(closest_x), np.array(closest_y)
 
 
-def mahal_nocov(ols, xs, xs_sd, ys, ys_sd, **cp_kwargs):
 
+
+
+
+def mahal_nocov(xs, xs_sd, ys, ys_sd, line_gi = (1,0), **cp_kwargs):
+    """Pass x, y values and stdev. Returns (euclidian distance, p-values of
+    mahal distance, and mahal_distance from the x=y line.
+
+    Other lines can be specified using line_gi giving gradient and intercept
+    (y=ax+b)"""
+
+    ols = FakeOLS(*line_gi)
     # get closest points, calc significance
     cxs, cys = closest_point(ols, xs, ys, **cp_kwargs)
     mahal_dist = np.sqrt((cxs - xs) ** 2 / xs_sd + (cys - ys) ** 2 / ys_sd)

@@ -16,7 +16,7 @@ logging.getLogger('matplotlib').setLevel(logging.WARNING)
 
 from crispr_tools.count_reads import count_reads, count_batch, map_counts
 from crispr_tools.tools import plot_read_violins, plot_ROC, plot_volcano, tabulate_mageck, plot_volcano_from_mageck
-from crispr_tools.jacks_tools import tablulate_score, tabulate_jacks, plot_volcano_from_scoretable, scores_scatterplot
+from crispr_tools.jacks_tools import tablulate_score, scores_scatterplot, mahal_nocov
 
 __version__ = '1.7.2b5'
 
@@ -72,8 +72,11 @@ def call_JACKS(fn_counts, fn_repmap, outprefix, norm='mode'):
         runJACKS(fn_counts, 'tmp.repmap.tsv', fn_counts, 'rep', 'samp', None, 'ctrl', 'guide', 'gene',
                  norm_type=norm, outprefix=outprefix+'.'+ctrlgroup+'.')
 
-def run_analysis(fn_counts, fn_repmap, outdir, file_prefix, labeldep = 30, labelenr = 10,
+def run_analysis(fn_counts, fn_repmap, outdir, file_prefix, labeldep = 20, labelenr = 20,
                  charts_only = False):
+
+    # comps end up on
+
     # if fileprefix[-1] != '.':
     #     fileprefix += '.'
 
@@ -173,17 +176,26 @@ def run_analysis(fn_counts, fn_repmap, outdir, file_prefix, labeldep = 30, label
             print('** No comparisons')
             continue
         for analysis, tab in ('jacks_mode', scoresmode), ('jacks_median', scoresmed):
+            mahals = pd.DataFrame(index=tab.index)
             for samp, comps in comptab.iterrows():
                 if comps.comps is not np.NaN:
                     comps = comps.comps.replace(' ', '').split(',')
+                    # comps generally controls
                     for comp in comps:
                         if comp not in tab.columns or samp not in tab.columns:
                             continue
-                        scores_scatterplot(comp, samp, tab, min_mahal=0.5, label_mahal=40)
+                        # plot
+                        scores_scatterplot(comp, samp, tab, label_pos=labelenr, label_neg=labeldep)
                         plt.savefig(str(
-                            Path(outdir, analysis, 'volcano', fnprefix+"{}_vs_{}.scatter.png".format(comp, samp))
+                            Path(outdir, analysis, 'scatter', fnprefix+"{}_vs_{}.scatter.png".format(comp, samp))
                         ), dpi=150)
                         plt.close()
+
+                        # pop mahal table
+                        A, B = tab[comp], tab[samp]
+                        _, _, mahal = mahal_nocov(A['jacks_score'], A['stdev'], B['jacks_score'], B['stdev'])
+                        mahals.loc[:, f"{a} vs {b}"] = mahal
+            mahals.to_csv(Path(outdir, analysis, 'tables', fnprefix+f"{a}_vs_{b}.csv"))
             # wipes over the one produced above if comptab exists.
             call(['tar', '-zcf', str(Path(outdir, analysis + 'scatter_charts.tar.gz')), str(Path(outdir, analysis, 'scatter'))])
 
