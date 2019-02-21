@@ -266,7 +266,7 @@ def run_analysis(fn_counts, fn_design_sheet, outdir, file_prefix, labeldep = 20,
                     pipeLOG.info(f'MAgeck results comp using {samphead} {comphead}, {fdrexp}')
                     scores_scatterplot(comphead, samphead, mag_tables[lfctab], True, labelenr, labeldep,
                                        distance=mag_tables[fdrtab].loc[:, (fdrexp, 'fdr_log10')],
-                                       min_label_dist=)
+                                       min_label_dist=0.3)
                     plt.savefig(str(
                         Path(outdir, 'mageck', 'scatter', file_prefix+".{}_vs_{}.scatter.png".format(comp, samp))
                     ), dpi=150)
