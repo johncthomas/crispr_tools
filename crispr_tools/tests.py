@@ -6,4 +6,4 @@ def test_pipeline(**kwargs):
              labeldep=10, labelenr=10,  **kwargs)
 
 if __name__ == '__main__':
-    test_pipeline(charts_only=True)
+    test_pipeline(charts_only=False)
