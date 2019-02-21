@@ -3,12 +3,12 @@ from os import path
 
 setup(
     name = 'crispr_tools',
-    version = '1.7.5b1',
+    version = '1.7.6b1',
     author = 'John C. Thomas',
     author_email = 'jcthomas000@gmail.com',
     packages=find_packages(exclude=['contrib', 'docs', 'tests']),
     install_requires = [
-        'numpy', 'scipy', 'matplotlib', 'pandas', 'jacks'
+        'numpy', 'scipy', 'matplotlib', 'pandas', 'jacks', 'python>=3.6'
     ],
 
     #scripts=['count_reads']

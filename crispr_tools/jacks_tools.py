@@ -99,8 +99,9 @@ def plot_volcano_from_scoretable(score_table, savefn=None, ax=None,
 
 
 
-def scores_scatterplot(x, y, table=None, mahal_gradient=True,  label_pos=0, label_neg=0, minlabel=0.5,
-                       labels=None, formatters:List[dict]=None, ax=None) -> plt.Axes:
+def scores_scatterplot(x, y, table=None, distance_gradient=True, label_pos=0, label_neg=0,
+                       distance:pd.Series=None, min_label_dist=0.5, min_label_diff=0.5,
+                        labels=None, formatters:List[dict]=None, ax=None) -> plt.Axes:
     """Produce biplot of 2 essentiality series.
     args:
         x, y:
@@ -129,6 +130,13 @@ def scores_scatterplot(x, y, table=None, mahal_gradient=True,  label_pos=0, labe
                 [(list_of_genes, format_dict), ...]
 
     returns fig, ax if ax=None, otherwise the supplied ax is returnd."""
+
+    # required changes;
+    #   distance optionally supplied
+    #   optional filter by abs(x-y)>threshold (use minlabel...?)
+    #   remove refs to jacks_score
+
+
     fig=None
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(8,8))
@@ -137,8 +145,14 @@ def scores_scatterplot(x, y, table=None, mahal_gradient=True,  label_pos=0, labe
         x_score = x
         y_score = y
     else:
-        x_score = table[x].jacks_score
-        y_score = table[y].jacks_score
+        cols = table[x].columns
+        for k in ('jacks_score', 'lfc'):
+            if k in cols:
+                break
+        else:
+            raise ValueError('No score column found in '+str(cols))
+        x_score = table[x][k]
+        y_score = table[y][k]
 
     if labels is None:
         labels = []
@@ -146,36 +160,41 @@ def scores_scatterplot(x, y, table=None, mahal_gradient=True,  label_pos=0, labe
         labels = copy(labels)
 
     pos_genes, neg_genes = [], []
-    if mahal_gradient:
-        _, _, mahal = mahal_nocov(
-            x_score, table[x].stdev, y_score, table[y].stdev
-        )
+    if distance_gradient:
+        if distance is None:
+            _, _, distance = mahal_nocov(
+                x_score, table[x].stdev, y_score, table[y].stdev
+            )
 
         # get the genes to be labelled first
-        mahal = mahal.sort_values()
+        distance = distance.sort_values()
         # get most distance in the pos and neg directions
         if label_pos is True:
             label_pos = np.inf
         if label_neg is True:
             label_neg = np.inf
-        pos_genes = mahal.loc[mahal > minlabel].tail(label_pos).index
-        neg_genes = mahal.loc[mahal < 0-minlabel].head(label_neg).index
 
-        # for grandient we don't care about pos/neg
+        # get top N labels, filtered for those passing distance and x-y difference thresholds
+        diff_mask = abs(x_score - y_score) > min_label_diff
+        pos_genes = distance.loc[(distance > min_label_dist) & diff_mask].tail(label_pos).index
+        neg_genes = distance.loc[(distance < 0 - min_label_dist) & diff_mask].head(label_neg).index
+
+
+        # for gradient we don't care about pos/neg
         # but we do want the order to match x_score as the index will be lost
-        mahal = mahal.reindex(x_score.index).abs()
-        max_mahal = max(mahal)
+        distance = distance.reindex(x_score.index).abs()
+        max_dist = max(distance)
 
         # normalised mahaladonis for color scaling
-        if mahal_gradient is True:
-            min_mahal = 0
+        if distance_gradient is True:
+            min_dist = 0
         else:
-            min_mahal = mahal_gradient
-        nmahal = (mahal-min_mahal)/(max_mahal-min_mahal)
-        colrs = cm.viridis(nmahal) # loses the gene name indicies
+            min_dist = distance_gradient
+        norm_dist = (distance-min_dist)/(max_dist-min_dist)
+        colrs = cm.viridis(norm_dist) # loses the gene name indicies
         # RGBA
         grey = (0.68, 0.68, 0.68, 1)
-        for i, m in enumerate(nmahal):
+        for i, m in enumerate(norm_dist):
             # m == mahal-minmahal
             if m < 0:
                 colrs[i] = grey
@@ -207,8 +226,8 @@ def scores_scatterplot(x, y, table=None, mahal_gradient=True,  label_pos=0, labe
         cb = plt.colorbar(sm, fraction=0.03, pad=0.01, aspect=5)
 
         cb.set_ticks([0.0, 1.0])
-        cb.set_ticklabels([str(round(min_mahal, 2)),
-                           str(round(max_mahal, 2))])
+        cb.set_ticklabels([str(round(min_dist, 2)),
+                           str(round(max_dist, 2))])
 
     # labels
     txt = []
@@ -227,10 +246,10 @@ def scores_scatterplot(x, y, table=None, mahal_gradient=True,  label_pos=0, labe
 
     # label axes
     if table is not None:
-        plt.xlabel(x+' JACKS score')
-        plt.ylabel(y + ' JACKS score')
+        plt.xlabel(x+' '+k)
+        plt.ylabel(y +' '+k)
 
-    avoid_points = True if mahal_gradient is True else False
+    avoid_points = True if distance_gradient is True else False
     if avoid_points:
         adjust_text(txt, x_score, y_score, force_points=(0.2,0.25))
     else:
@@ -405,5 +424,12 @@ def mahal_nocov(xs, xs_sd, ys, ys_sd, line_gi = (1,0), **cp_kwargs):
 
 
 
+# from crispr_tools.tools import tabulate_mageck
+# import os
+# os.chdir('/Users/johnc.thomas/Dropbox/crispr/screens_analysis')
+# tab = tabulate_mageck('/Users/johnc.thomas/Dropbox/crispr/screens_analysis/scattertst/tst.')
+#
+# scores_scatterplot('B1-vs-B0', 'B2-vs-B0', tab,True, 5,5, distance=tab['B1-vs-B2'].fdr_log10, min_label_diff=0)
+# plt.show()
 
 
