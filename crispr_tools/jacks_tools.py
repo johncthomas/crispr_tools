@@ -11,7 +11,7 @@ try:
 except ModuleNotFoundError:
     def adjust_text(*args, **kwargs):
         pass
-
+from copy import copy
 __version__ = '0.6'
 
 #todo: sepfucntions for each table, one function that calls all, option to only return scores
@@ -99,7 +99,7 @@ def plot_volcano_from_scoretable(score_table, savefn=None, ax=None,
 
 
 
-def scores_scatterplot(x, y, table=None, mahal_gradient=True, label_pos=0, label_neg=0,
+def scores_scatterplot(x, y, table=None, mahal_gradient=True,  label_pos=0, label_neg=0, minlabel=0.5,
                        labels=None, formatters:List[dict]=None, ax=None) -> plt.Axes:
     """Produce biplot of 2 essentiality series.
     args:
@@ -117,8 +117,11 @@ def scores_scatterplot(x, y, table=None, mahal_gradient=True, label_pos=0, label
         mahal_gradient:
             if True points will be colored by mahal value.
 
-        label_top, label_bot:
+        label_pos, label_neg:
             Pass an int or True to label the most distant top or bottom points.
+
+        minlabel:
+            minimum abs(mahal) for labels to be applied by label_pos/neg
 
         formatters:
             list of tuples as below. format_dict is passed to
@@ -139,6 +142,8 @@ def scores_scatterplot(x, y, table=None, mahal_gradient=True, label_pos=0, label
 
     if labels is None:
         labels = []
+    else:
+        labels = copy(labels)
 
     pos_genes, neg_genes = [], []
     if mahal_gradient:
@@ -153,8 +158,8 @@ def scores_scatterplot(x, y, table=None, mahal_gradient=True, label_pos=0, label
             label_pos = np.inf
         if label_neg is True:
             label_neg = np.inf
-        pos_genes = mahal.tail(label_pos).index
-        neg_genes = mahal.head(label_neg).index
+        pos_genes = mahal.loc[mahal > minlabel].tail(label_pos).index
+        neg_genes = mahal.loc[mahal < 0-minlabel].head(label_neg).index
 
         # for grandient we don't care about pos/neg
         # but we do want the order to match x_score as the index will be lost
@@ -215,7 +220,7 @@ def scores_scatterplot(x, y, table=None, mahal_gradient=True, label_pos=0, label
                 plt.annotate(
                     lab,
                     (x_score[lab], y_score[lab]),
-                    bbox=dict(boxstyle='round,pad=0.1', fc='yellow', alpha=0.3),
+                    #bbox=dict(boxstyle='round,pad=0.1', fc='yellow', alpha=0.3),
                     arrowprops=dict(arrowstyle='->')
                 )
             )
@@ -227,7 +232,7 @@ def scores_scatterplot(x, y, table=None, mahal_gradient=True, label_pos=0, label
 
     avoid_points = True if mahal_gradient is True else False
     if avoid_points:
-        adjust_text(txt, x_score, y_score, )
+        adjust_text(txt, x_score, y_score, force_points=(0.2,0.25))
     else:
         adjust_text(txt, expand_text=(1.1, 1.2), )
 
@@ -367,9 +372,6 @@ def closest_point(ols, xs, ys, verbose=False):
         if verbose:
             print(p, '->', cp)
     return np.array(closest_x), np.array(closest_y)
-
-
-
 
 
 

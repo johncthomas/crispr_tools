@@ -1,4 +1,4 @@
-import logging, os
+import logging, os, pathlib
 import gzip
 import argparse
 from subprocess import call
@@ -23,6 +23,7 @@ __version__ = '1.7.5b1'
 
 #todo include log file and identification?
 #todo add sample labels to repmaps for nice chart labels
+#todo toy data for test
 
 """Go from FastQ files to completed JACKS/MAGeCK analysis. 
 fq->mapped_counts&violin plots are one command (count_reads.count_batch() ) 
@@ -116,10 +117,10 @@ def run_analysis(fn_counts, fn_repmap, outdir, file_prefix, labeldep = 20, label
         samp_map = repmap.groupby('samp').groups
 
         # comparison by sample names
-        comps = list(set([(row.ctrl, row.samp) for _, row in repmap.iterrows() if row.ctrl != row.samp]))
+        mag_pairs = list(set([(row.ctrl, row.samp) for _, row in repmap.iterrows() if row.ctrl != row.samp]))
 
         if not charts_only and not skip_mageck:
-            for ctrl, treat in comps:
+            for ctrl, treat in mag_pairs:
                 ctrls = ','.join(samp_map[ctrl])
                 treats = ','.join(samp_map[treat])
                 s = mageck_str.format(
@@ -171,14 +172,14 @@ def run_analysis(fn_counts, fn_repmap, outdir, file_prefix, labeldep = 20, label
             call(['tar', '-zcf', str(Path(outdir, analysis+'volcano_charts.tar.gz')) ,str(Path(outdir, analysis, 'volcano'))])
 
         #scattercharts using comparisons.csv
-        try:
-            #compstr = [s for s in xl.sheet_names if s.lower().startswith('comp')][0]
-            comptab = xl.parse('sample_deets', index_col=0)
-            if 'comps' not in comptab.columns:
-                raise ValueError
-        except:
-            print('** No comparisons')
-            continue
+
+        #compstr = [s for s in xl.sheet_names if s.lower().startswith('comp')][0]
+        comptab = xl.parse('sample_deets', index_col=0)
+        if 'comps' not in comptab.columns:
+            raise ValueError
+        # except:
+        #     print('** No comparisons')
+        #     continue
 
         if not skip_jacks:
             for analysis, tab in ('jacks_mode', scoresmode), ('jacks_median', scoresmed):
@@ -218,6 +219,12 @@ def iter_comps(comp_series: pd.Series, tab: pd.DataFrame):
                     continue
                 yield samp, comp
 
+def test_pipeline(**kwargs):
+    p = pathlib.Path(os.path.dirname(os.path.realpath(__file__)))
+    testp = str(p.parent/'tests')
+    run_analysis(testp+'/test_counts.tsv', testp+'/test_pipeline.xlsx', testp+'/ran_test', 'itsatest',
+             labeldep=10, labelenr=10, **kwargs)
+
 if __name__ == '__main__':
 
 
@@ -230,7 +237,7 @@ if __name__ == '__main__':
     parser.add_argument('outdir', metavar='OUTDIR', help='Path to where results files will be stored, a '
                         "directory structure will be created.")
     parser.add_argument('file_prefix', metavar='PREFIX', help="String to form identifying prefix for all files generated.")
-    parser.add_argument('-d', '--labeldep', metavar='N', type=int, default=30, help="Number of depleted genes to label"
+    parser.add_argument('-d', '--labeldep', metavar='N', type=int, default=10, help="Number of depleted genes to label"
                         "in charts.")
     parser.add_argument('-e', '--labelenr', metavar='N', type=int, default=10, help="Number of enriched genes to label"
                         "in charts.")

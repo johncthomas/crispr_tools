@@ -16,8 +16,7 @@ __version__ = 'v1.3.0'
 # Adding Mageck tab
 # fixed plot volcanos enrichment labeling
 
-#todo: sometimes lfc tables not writte, make it optional
-#todo: boxpot on the violins
+
 #todo: pass through non numeric columns in SFN
 #todo; pass plot_volcano a filen string and it loads the table
 
@@ -30,6 +29,19 @@ def drop_nonumeric(tab):
             axis=1
         )
     return tab
+
+def split_nonumeric(tab):
+    """drop columns from DF (tab) where [0, col] type is string,
+    and return as a tuple with dropped columns as a sperate DF"""
+    nonumeric = tab.columns[tab.iloc[0, :].apply(type) == str]
+    texttab = tab.loc[:, nonumeric].copy()
+    if len(nonumeric) > 0:
+        tab = tab.drop(
+            nonumeric,
+            axis=1
+        )
+
+    return tab, texttab
 
 def size_factor_normalise(cnt_tab, log=True):
     """The number by which MAGeCK uses to normalise its reads.
@@ -57,9 +69,11 @@ def size_factor_normalise(cnt_tab, log=True):
     return norm_tab
 
 
-def plot_read_violins(tab, column_labs=None, n_per_row=0, log=True, size_norm=False, ax=None):
+def plot_read_violins(tab, column_labs=None, log=True, size_norm=False, ax=None):
     """Takes counts table, does log2 (optionally size factor normalises)
     and produces violin density plots.
+
+    figsize is (3*n, 6)
 
     Returns a plt.Axes"""
     if ax is None:
