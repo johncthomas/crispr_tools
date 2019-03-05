@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+
 from jacks.jacks_io import runJACKS
 
 pipeLOG = logging.getLogger('pipeline')
@@ -17,10 +18,6 @@ from jacks.infer import LOG as jacksLOG
 jacksLOG.setLevel(logging.WARNING)
 logging.getLogger('matplotlib').setLevel(logging.WARNING)
 
-# import mageck
-# mageckLOG = logging.getLogger('mageck')
-
-
 from crispr_tools.count_reads import count_reads, count_batch, map_counts
 from crispr_tools.tools import plot_read_violins, plot_ROC, plot_volcano, tabulate_mageck, plot_volcano_from_mageck
 from crispr_tools.jacks_tools import tablulate_score, scores_scatterplot, mahal_nocov
@@ -28,9 +25,10 @@ from crispr_tools.jacks_tools import tablulate_score, scores_scatterplot, mahal_
 __version__ = '1.7.6b1'
 
 
-#todo include log file and identification?
-#todo add sample labels to repmaps for nice chart labels
-#todo toy data for test
+#todo use YAML instead of Excel books (excel reading isn't default part of pandas...)
+#todo don't ouput xlsx for comps
+#todo add sample labels to sample_details for nice chart labels
+
 
 """Go from FastQ files to completed JACKS/MAGeCK analysis. 
 fq->mapped_counts&violin plots are one command (count_reads.count_batch() ) 
@@ -67,8 +65,6 @@ def call_magecks(fn_counts, fn_repmap, outprefix):
 
 def call_JACKS(fn_counts, fn_repmap, outprefix, norm='mode'):
     # it'll probably be easiest to just write a temp repmap tsv from the xlsx
-    sheeti = 0
-
     xl = pd.ExcelFile(fn_repmap)
     for ctrlgroup in xl.sheet_names:
         repmap = xl.parse(ctrlgroup)
@@ -86,8 +82,9 @@ def set_logger(log_fn):
     #mageckLOG.addHandler(hndlr)
 
 
-def run_analysis(fn_counts, fn_design_sheet, outdir, file_prefix, labeldep = 20, labelenr = 20,
-                 charts_only = False, skip_mageck = False, skip_jacks = False, dont_log=False):
+def run_analysis(fn_counts, fn_design_sheet, outdir, file_prefix, volc_labels=15, scatter_labels=10,
+                 charts_only = False, jacks_eff_fn=None,
+                 skip_mageck = False, skip_jacks = False, dont_log=False):
 
     call(['mkdir', outdir])
     if not dont_log:
@@ -115,14 +112,14 @@ def run_analysis(fn_counts, fn_design_sheet, outdir, file_prefix, labeldep = 20,
 
     pipeLOG.info('Control groups being used: '+ctrl_groups)
 
-    comptab = xl.parse('sample_deets', index_col=0)
+    comptab = xl.parse('sample_details', index_col=0)
     if 'comps' not in comptab.columns:
         raise ValueError
 
 
     for ctrlgroup in ctrl_groups:
         fnprefix = file_prefix + '.' + ctrlgroup + '.'
-        pipeLOG.info(f'Running {ctrlgroup}, writing to {fnprefix}')
+        pipeLOG.info(f'\nRunning {ctrlgroup}, writing to {fnprefix}')
         jmode_prefix = str(Path(outdir, 'jacks_mode', 'files', fnprefix))
         jmed_prefix = str(Path(outdir, 'jacks_median', 'files', fnprefix))
 
@@ -133,12 +130,20 @@ def run_analysis(fn_counts, fn_design_sheet, outdir, file_prefix, labeldep = 20,
 
         if not charts_only and not skip_jacks:
             pipeLOG.info("Running JACKS, mode and median normalised")
-            runJACKS(fn_counts, 'tmp.repmap.tsv', fn_counts, 'rep', 'samp', None, 'ctrl', 'guide', 'gene',
-                     norm_type='mode', outprefix=jmode_prefix)
-            runJACKS(fn_counts, 'tmp.repmap.tsv', fn_counts, 'rep', 'samp', None, 'ctrl', 'guide', 'gene',
-                     norm_type='median', outprefix=jmed_prefix)
+            if jacks_eff_fn:
+                jacks_eff = jacks_eff_fn.format(ctrlgroup)
+                if os.path.isfile(jacks_eff):
+                    pipeLOG.info(f'\tUsing {jacks_eff} for efficacy')
+                else:
+                    pipeLOG.info(f"\tcould not find {jacks_eff}, calculating efficacy")
+                    jacks_eff = None
+            else:
+                jacks_eff = None
 
-
+            runJACKS(fn_counts, 'tmp.repmap.tsv', fn_counts, 'rep', 'samp', None, 'ctrl', 'guide', 'gene',
+                     norm_type='mode', outprefix=jmode_prefix, reffile=jacks_eff)
+            runJACKS(fn_counts, 'tmp.repmap.tsv', fn_counts, 'rep', 'samp', None, 'ctrl', 'guide', 'gene',
+                     norm_type='median', outprefix=jmed_prefix, reffile=jacks_eff)
 
         # comparison by sample names
         mag_pairs = list(set([(row.ctrl, row.samp) for _, row in repmap.iterrows() if row.ctrl != row.samp]))
@@ -181,6 +186,7 @@ def run_analysis(fn_counts, fn_design_sheet, outdir, file_prefix, labeldep = 20,
         #volcano charts of all
         # use the universal one, have label options as part of args, maybe as a dict.
         for analysis_str, xkey, analysis_tab in analyses_used:
+            pipeLOG.info('Volcano plot, '+analysis_str)
             #analysis = analysis
             for exp in analysis_tab.columns.levels[0]:
                 if analysis_str.startswith('jacks'):
@@ -192,7 +198,7 @@ def run_analysis(fn_counts, fn_design_sheet, outdir, file_prefix, labeldep = 20,
                     chart_title = '{} from {} ({} analysis)'.format(treatnm, ctrlnm, analysis_str)
                 plot_volcano(
                     xkey, 'fdr_log10', analysis_tab[exp], chart_title,
-                    labeldep,labelenr,p_thresh=0.1,
+                    volc_labels,volc_labels,p_thresh=0.1,
                     outfn=str(Path(outdir, analysis_str, 'volcano', fnprefix+exp+'.'+analysis_str+'_volcano.png'))
                 )
                 plt.close()
@@ -205,27 +211,32 @@ def run_analysis(fn_counts, fn_design_sheet, outdir, file_prefix, labeldep = 20,
         # if not skip_mageck:
         #     analyses_tups.append(('mageck', scores_mageck))
 
-        # should never be empty
+        # do jacks scatter and mahal table. tups should never be empty
         for analysis_str, analysis_tab in analyses_tups:
             pipeLOG.info(f'Doing comparisons of {analysis_str}')
             mahals = pd.DataFrame(index=analysis_tab.index)
+            comparisons_done = False
             for samp, comp in iter_comps(comptab.comps, analysis_tab):
-                pipeLOG.info(f"\t{samp} vs {comp}")
-                if analysis_str.startswith('jacks'):
-                    scores_scatterplot(comp, samp, analysis_tab, label_pos=labelenr, label_neg=labeldep)
-                    # pop mahal table
-                    A, B = analysis_tab[comp], analysis_tab[samp]
-                    _, _, mahal = mahal_nocov(A['jacks_score'], A['stdev'], B['jacks_score'], B['stdev'])
-                    mahals.loc[:, f"{comp} vs {samp}"] = mahal
-                # if analysis.startswith('mageck'):
-                #     scores_scatterplot(comp, samp, tab, label_pos=labelenr, label_neg=labeldep)
+                comparisons_done = True
+                pipeLOG.info(f"\t{comp} vs {samp}")
+                #scatter
 
+
+                scores_scatterplot(comp, samp, analysis_tab, label_pos=scatter_labels, label_neg=scatter_labels)
+                plt.title(f"{comp} vs {samp} ({ctrlgroup}, JACKS)")
                 plt.savefig(str(
                     Path(outdir, analysis_str, 'scatter', fnprefix+"{}_vs_{}.scatter.png".format(comp, samp))
                 ), dpi=150)
                 plt.close()
 
-            mahals.to_csv(Path(outdir, analysis_str, 'tables', fnprefix+f"mahalanobis_distances.csv"))
+                # pop mahal table
+                A, B = analysis_tab[comp], analysis_tab[samp]
+                _, _, mahal = mahal_nocov(A['jacks_score'], A['stdev'], B['jacks_score'], B['stdev'])
+                mahals.loc[:, f"{comp} vs {samp}"] = mahal
+
+            if comparisons_done:
+                mahals.to_csv(Path(outdir, analysis_str, 'tables', fnprefix+f"mahalanobis_distances.csv"))
+
             # wipes over the one produced above if comptab exists.
             call(['tar', '-zcf', str(Path(outdir, analysis_str + 'scatter_charts.tar.gz')),
                   str(Path(outdir, analysis_str, 'scatter'))])
@@ -233,7 +244,7 @@ def run_analysis(fn_counts, fn_design_sheet, outdir, file_prefix, labeldep = 20,
               str(Path(outdir, analysis_str, 'tables'))])
 
     if not skip_mageck:
-        pipeLOG.info(f'Doing comparisons of mageck')
+        pipeLOG.info('Doing comparisons of mageck')
         mag_tables = {}
         # get all the mageck tables available since we need to compare multiple
         # (this dict should probably be built above)
@@ -264,9 +275,11 @@ def run_analysis(fn_counts, fn_design_sheet, outdir, file_prefix, labeldep = 20,
             for fdrtab, fdrexp in fdr_tabs:
                 for lfctab, samphead, comphead in lfc_tabs:
                     pipeLOG.info(f'MAgeck results comp using {samphead} {comphead}, {fdrexp}')
-                    scores_scatterplot(comphead, samphead, mag_tables[lfctab], True, labelenr, labeldep,
+
+                    scores_scatterplot(comphead, samphead, mag_tables[lfctab], True, scatter_labels, scatter_labels,
                                        distance=mag_tables[fdrtab].loc[:, (fdrexp, 'fdr_log10')],
                                        min_label_dist=0.3)
+                    plt.title(f"{comphead} vs {samphead} (MAGeCK)")
                     plt.savefig(str(
                         Path(outdir, 'mageck', 'scatter', file_prefix+".{}_vs_{}.scatter.png".format(comp, samp))
                     ), dpi=150)
@@ -297,12 +310,16 @@ if __name__ == '__main__':
     parser.add_argument('outdir', metavar='OUTDIR', help='Path to where results files will be stored, a '
                         "directory structure will be created.")
     parser.add_argument('file_prefix', metavar='PREFIX', help="String to form identifying prefix for all files generated.")
-    parser.add_argument('-d', '--labeldep', metavar='N', type=int, default=10, help="Number of depleted genes to label"
-                        "in charts.")
-    parser.add_argument('-e', '--labelenr', metavar='N', type=int, default=10, help="Number of enriched genes to label"
-                        "in charts.")
+    parser.add_argument('-v', '--volc-labels',dest='volc_labels', metavar='N', type=int, default=30,
+                        help="Number of depleted/enriched genes to label in volcano charts.")
+    parser.add_argument('-s', '--scatter-labels', metavar='N', type=int, default=10, dest='scatter_labels',
+                        help="Number of genes to label on either side of The Line in scatter charts.")
     parser.add_argument('--charts-only', action='store_true', default=False,
                         help="Don't run MAGeCK or JACKS, just produce plots with existing files.")
+    parser.add_argument('-j', '--jacks-efficacy', metavar='EFF_FILE', dest='jacks_eff_fn',
+                        help='Path to efficacy file to be used in JACKS analysis. '
+                             'If the provided string contains {}, the repmap ctrl group will be substituted'
+                             'into the filename. Optional.')
     parser.add_argument('--skip-jacks', action='store_true', dest='skip_jacks',
                         help="don't run JACKS analysis or try to plot from JACKS analyses")
     parser.add_argument('--skip-mageck', action='store_true', dest='skip_mageck',

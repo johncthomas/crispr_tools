@@ -240,7 +240,7 @@ def scores_scatterplot(x, y, table=None, distance_gradient=True, label_pos=0, la
                     lab,
                     (x_score[lab], y_score[lab]),
                     #bbox=dict(boxstyle='round,pad=0.1', fc='yellow', alpha=0.3),
-                    arrowprops=dict(arrowstyle='->')
+                    arrowprops=dict(arrowstyle='->', color='#ff8533' )
                 )
             )
 

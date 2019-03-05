@@ -4,13 +4,18 @@ import matplotlib.pyplot as plt
 from scipy import stats
 try:
     from adjustText import adjust_text
-except ImportError:
-    adjust_text = None
+except ModuleNotFoundError:
+    def adjust_text(*args, **kwargs):
+        pass
 
 from pathlib import Path, PosixPath, WindowsPath
 import pandas as pd
 
 __version__ = 'v1.3.0'
+
+# import logging
+# slowvolcLOG = logging.getLogger('slow_volc')
+# slowvolcLOG.setLevel(logging.DEBUG)
 
 #v1.3.0
 # Adding Mageck tab
@@ -102,10 +107,14 @@ def plot_read_violins(tab, column_labs=None, log=True, size_norm=False, ax=None)
     return ax
 
 
-def plot_ROC(tab, things_oi, label=None):
+def plot_ROC(tab, things_oi, label=None, ax = None):
     """Tab needs to be a series or dataframe containing values used to
     order the tab index."""
-    plt.figure(figsize=(4,4))
+    if ax is None:
+        _, ax = plt.subplots(1,1, figsize=(4,4))
+    else:
+        plt.gca(ax)
+    tab = tab.copy()
     things_oi = things_oi[things_oi.isin(tab.index)]
     #print(things_oi)
     if len(tab.shape) > 1:
@@ -121,6 +130,7 @@ def plot_ROC(tab, things_oi, label=None):
                      np.cumsum(col.index.isin(toi))/len(toi),
                     label=lab)
     else:
+        tab = tab.sort_values()
         plt.plot(np.arange(tab.shape[0])/tab.shape[0], np.cumsum(tab.index.isin(things_oi))/len(things_oi))
 #     plt.plot(np.arange(kin.shape[0])/kin.shape[0], np.cumsum(kin.index.isin(gn))/len(gn),
 #             label='RPE1 screen essentials')
@@ -130,6 +140,7 @@ def plot_ROC(tab, things_oi, label=None):
     plt.title('ROC')
     plt.legend()
     plt.tight_layout()
+    return ax
 
 
 def plot_volcano_from_mageck(tab, title='', label_genes=None, outfn='', ax=None, source='mageck'):
@@ -142,6 +153,7 @@ def plot_volcano_from_mageck(tab, title='', label_genes=None, outfn='', ax=None,
     plot_volcano(tab['pos|lfc'], tab['ml10_fdr'], title=title, other_labels=label_genes,
                  outfn=outfn, ax=ax)
 
+#POINT = 0
 
 def plot_volcano(lfc, fdr, tab=None, title='', label_deplet=0, label_enrich=0,
                  other_labels=None, p_thresh=0.05, outfn='', ax=None,
@@ -160,6 +172,9 @@ def plot_volcano(lfc, fdr, tab=None, title='', label_deplet=0, label_enrich=0,
     :param ax: optional plt.Axes instance to use
     :return: plt.Axes
     """
+    #print('TP ', POINT)
+
+    #this is silly
     lfc_lab, fdr_lab = None, None
     if tab is not None:
         lfc_lab = lfc
@@ -183,8 +198,8 @@ def plot_volcano(lfc, fdr, tab=None, title='', label_deplet=0, label_enrich=0,
     # label the top and bottom most, if specified
     texts = []
     texts_done = []
-    # get subtables
 
+    # get subtables
     # filter out excluded labels by getting Series containing only included labs,
     # turn that into a mask of the original series and combining that with the dep/enr masks.
     filtered_lfc = lfc.copy()
@@ -199,11 +214,10 @@ def plot_volcano(lfc, fdr, tab=None, title='', label_deplet=0, label_enrich=0,
         depmask = (lfc < 0)
         enrmask = (lfc > 0)
 
-
     # get tails from ascending order
-    dep = fdr[depmask].sort_values().tail(label_deplet)
-    enr = fdr[enrmask].sort_values().tail(label_enrich)
-
+    dep = tab.loc[depmask, :].sort_values(lfc_lab, ascending=False).sort_values(fdr_lab).tail(label_deplet)[fdr_lab]
+    enr = tab.loc[enrmask, :].sort_values([fdr_lab, lfc_lab]).tail(label_deplet)[fdr_lab]
+    # label the tails
     for end in dep, enr:
         for lab, an_fdr in end.items():
             if an_fdr < p_thresh:
@@ -219,7 +233,7 @@ def plot_volcano(lfc, fdr, tab=None, title='', label_deplet=0, label_enrich=0,
                 plt.text(lfc[lab], fdr[lab], lab)
             )
 
-    if texts:
+    if texts and adjust_text:
         adjust_text(texts, arrowprops=dict(arrowstyle='->', color='red'))
 
     if lfc_lab is None:

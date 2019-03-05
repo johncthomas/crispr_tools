@@ -7,9 +7,10 @@ from pathlib import Path, PosixPath, WindowsPath
 
 from typing import List
 
-__version__ = '1.3.1b1'
+__version__ = '1.3.1b2'
 
 # 1.3.1 returned column order of map_counts now 'guide', 'gene', [everything else]
+#       fixed splitter issue
 # v1.3.0 added map_counts
 # v1.2.4 added printed info explaining sample merges.
 # v1.2.3 changed func name to count_reads, added import to __init__, renamed to crispr_tools
@@ -20,6 +21,7 @@ __version__ = '1.3.1b1'
 # v1.2 filename prefix, removed directory walking, added merge_samples, removed merge_lanes
 # v1.1 added argument parsing, options to merge lanes
 
+#todo IMPORTANT make sure writing mapped counts works with single sample
 #todo just ouput a single file what
 #todo use **kwargs to pass parsed args to count_batch
 #todo use logging instead of stealing print
@@ -90,7 +92,7 @@ def get_file_list(files_dir) -> List[os.PathLike]:
     return file_list
 
 
-def count_batch(fn_or_dir, slicer, fn_prefix='', seq_len=None, seq_offset=0, fn_suffix='rawcount',
+def count_batch(fn_or_dir, slicer, fn_prefix='', seq_len=None, seq_offset=0, fn_suffix='.rawcount',
                 fn_split='_R1_', merge_samples=False, just_go=False, quiet=False,
                 allowed_extensions = ('.fastq', 'fastq.gz', '.fq')):
     """Write a table giving the frequency of all unique sequences from a fastq
@@ -174,9 +176,9 @@ def count_batch(fn_or_dir, slicer, fn_prefix='', seq_len=None, seq_offset=0, fn_
     def write_count(a_cnt, fn_base):
         if fn_prefix:
             if fn_prefix[-1] == '/':
-                fs = '{}{}.{}.txt'
+                fs = '{}{}{}.txt'
             else:
-                fs = '{}.{}.{}.txt'
+                fs = '{}.{}{}.txt'
             outfn = fs.format(fn_prefix, fn_base, fn_suffix)
         else:
             outfn = '{}.{}.txt'.format(fn_base, fn_suffix)
@@ -207,7 +209,7 @@ def count_batch(fn_or_dir, slicer, fn_prefix='', seq_len=None, seq_offset=0, fn_
 
 def map_counts(fn_or_dir, lib, guidehdr='guide', genehdr='gene',
                drop_unmatched=False, report=False, splitter='.raw',
-               out_fn=None):
+               remove_text = '', out_fn=None):
     """lib needs to be indexed by guide sequence. If it's not a DF a DF will
     be created and indexed by 'seq' or the first column. Returns a DF indexed
     by 'guide' with 'gene' as the second column.
@@ -293,15 +295,15 @@ if __name__ == '__main__':
     parser.add_argument('-s', metavar='M,N',
                         help='Slice indicies to truncate sequences (zero indexed, not end-inclusive). Comma-sep numbers. Required.',
                         required=True)
-    parser.add_argument('-f', default='rawcount', metavar='FN_SUFFIX',
-                        help="Suffix added to output files, .txt will always be added after. Default `rawcount`")
+    parser.add_argument('-f', default='.rawcount', metavar='FN_SUFFIX',
+                        help="Suffix added to output files, .txt will always be added after. Default `.rawcount`")
     parser.add_argument('-p', default='', metavar='FN_PREFIX',
                         help="Prefix added to output files, can include absolute or relative paths.")
     parser.add_argument('--fn-split', default='_R1_', metavar='STR',
                         help="String used to split filenames and form output file prefix. Default `_R1_`." \
                              "Doesn't do anything if --merge-samples is used.")
     parser.add_argument('--merge-samples', action='store_true', default=False,
-                        help="Merge counts from files with identical sample names. Be careful not to double count decompressed & compressed files.")
+                        help="Merge counts from files with identical sample names.")
     parser.add_argument('--just-go', action='store_true', default=False, help="Don't wait for confirmation.")
     parser.add_argument('--quiet', action='store_true', default=False, help="Don't print helpful messages, enables --just-go.")
     parser.add_argument('--library', default=None, metavar='LIB_PATH',
@@ -315,8 +317,10 @@ if __name__ == '__main__':
     written_fn = count_batch(clargs.files, slicer, clargs.p, None, 0, clargs.f, clargs.fn_split, clargs.merge_samples,
                 clargs.just_go, clargs.quiet)
     if clargs.library:
-        map_counts(written_fn, clargs.library, drop_unmatched=True, report=True,
-                   out_fn=clargs.p+'.counts.tsv')
+        # remove file prefix
+        fpref = Path(clargs.p).stem.split('.')[1]
+        map_counts(written_fn, clargs.library, drop_unmatched=True, report=True, remove_text=fpref,
+                   out_fn=clargs.p+'.counts.tsv', splitter=clargs.f)
 
 
 
