@@ -5,7 +5,7 @@ from os import path
 
 setup(
     name = 'crispr_tools',
-    version = '1.7.6b5',
+    version = '1.7.6b6',
     author = 'John C. Thomas',
     author_email = 'jcthomas000@gmail.com',
     packages=find_packages(exclude=['contrib', 'docs', 'tests']),

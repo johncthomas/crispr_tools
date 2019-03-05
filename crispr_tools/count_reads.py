@@ -211,7 +211,7 @@ def map_counts(fn_or_dir, lib, guidehdr='guide', genehdr='gene',
                drop_unmatched=False, report=False, splitter='.raw',
                remove_text = '', out_fn=None):
     """lib needs to be indexed by guide sequence. If it's not a DF a DF will
-    be created and indexed by 'seq' or the first column. Returns a DF indexed
+    be loaded and indexed by 'seq' or the first column. Returns a DF indexed
     by 'guide' with 'gene' as the second column.
 
     """
@@ -228,6 +228,7 @@ def map_counts(fn_or_dir, lib, guidehdr='guide', genehdr='gene',
             lib.set_index('seq', drop=False, inplace=True)
         else:
             lib.set_index(lib.columns[0])
+    # else the library should be in a sueable form.
 
     # write a single table
     file_list = get_file_list(fn_or_dir)
@@ -269,7 +270,7 @@ def map_counts(fn_or_dir, lib, guidehdr='guide', genehdr='gene',
 
     # sort out columns
     cols = list(cnt.columns)
-    cnt = cnt.reindex([guidehdr, genehdr] + cols[1:-2], axis='columns',)
+    cnt = cnt.reindex([guidehdr, genehdr] + cols[:-2], axis='columns',)
     cnt.set_index(guidehdr, inplace=True)
 
     if out_fn:

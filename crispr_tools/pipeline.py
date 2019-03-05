@@ -110,7 +110,7 @@ def run_analysis(fn_counts, fn_design_sheet, outdir, file_prefix, volc_labels=15
     else:
         ctrl_groups = [s for s in xl.sheet_names if any([x in s for x in('D2', 'pre', 'NT', 'DMSO')])]
 
-    pipeLOG.info('Control groups being used: '+ctrl_groups)
+    pipeLOG.info('Control groups being used: '+', '.join(ctrl_groups))
 
     comptab = xl.parse('sample_details', index_col=0)
     if 'comps' not in comptab.columns:
