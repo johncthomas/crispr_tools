@@ -1,6 +1,7 @@
 from pipeline import *
 from shutil import rmtree
 import os
+
 def test_pipeline(**kwargs):
     p = pathlib.Path(os.path.dirname(os.path.realpath(__file__)))
     #print(p)

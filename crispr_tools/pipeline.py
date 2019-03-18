@@ -8,8 +8,10 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-
 from jacks.jacks_io import runJACKS
+
+with open(pathlib.Path(__file__).parent/'version.txt') as f:
+    __version__ = f.readline().replace('\n', '')
 
 pipeLOG = logging.getLogger('pipeline')
 pipeLOG.setLevel(logging.INFO)
@@ -20,10 +22,7 @@ logging.getLogger('matplotlib').setLevel(logging.WARNING)
 
 from crispr_tools.count_reads import count_reads, count_batch, map_counts
 from crispr_tools.tools import plot_read_violins, plot_ROC, plot_volcano, tabulate_mageck, plot_volcano_from_mageck
-from crispr_tools.jacks_tools import tablulate_score, scores_scatterplot, mahal_nocov
-
-__version__ = '1.7.6b1'
-
+from crispr_tools.jacks_tools import tabulate_score, scores_scatterplot, mahal_nocov
 
 #todo use YAML instead of Excel books (excel reading isn't default part of pandas...)
 #todo don't ouput xlsx for comps
@@ -85,6 +84,8 @@ def set_logger(log_fn):
 def run_analysis(fn_counts, fn_design_sheet, outdir, file_prefix, volc_labels=15, scatter_labels=10,
                  charts_only = False, jacks_eff_fn=None,
                  skip_mageck = False, skip_jacks = False, dont_log=False):
+
+    pipeLOG.info("Version = "+__version__)
 
     call(['mkdir', outdir])
     if not dont_log:
@@ -167,21 +168,21 @@ def run_analysis(fn_counts, fn_design_sheet, outdir, file_prefix, volc_labels=15
         analyses_used = []
         # get results tables of all
         if not skip_jacks:
-            scoresmode = tablulate_score(jmode_prefix)
-            scoresmed = tablulate_score(jmed_prefix)
+            scoresmode = tabulate_score(jmode_prefix)
+            scoresmed = tabulate_score(jmed_prefix)
             analyses_used.extend([('jacks_mode', 'jacks_score',  scoresmode),
                                   ('jacks_median', 'jacks_score', scoresmed)])
             if not charts_only:
                 pipeLOG.info('Writing JACKS tables')
-                scoresmode.to_excel(str(Path(outdir, 'jacks_mode', 'tables', fnprefix+'jacks_scores.xlsx')))
-                scoresmed.to_excel(str(Path(outdir, 'jacks_median', 'tables', fnprefix + 'jacks_scores.xlsx')))
+                scoresmode.to_csv(str(Path(outdir, 'jacks_mode', 'tables', fnprefix+'jacks_scores.csv')))
+                scoresmed.to_csv(str(Path(outdir, 'jacks_median', 'tables', fnprefix + 'jacks_scores.csv')))
 
         if not skip_mageck:
             scores_mageck = tabulate_mageck(mf_prefix)
             analyses_used.append(('mageck', 'lfc', scores_mageck))
             if not charts_only:
                 pipeLOG.info('Writing MAGeCK tables')
-                scores_mageck.to_excel(str(Path(outdir, 'mageck', 'tables', fnprefix+'mageck_table.xlsx')))
+                scores_mageck.to_csv(str(Path(outdir, 'mageck', 'tables', fnprefix+'mageck_table.csv')))
 
         #volcano charts of all
         # use the universal one, have label options as part of args, maybe as a dict.
@@ -203,7 +204,11 @@ def run_analysis(fn_counts, fn_design_sheet, outdir, file_prefix, volc_labels=15
                 )
                 plt.close()
 
-            call(['tar', '-zcf', str(Path(outdir, analysis_str+'volcano_charts.tar.gz')) ,str(Path(outdir, analysis_str, 'volcano'))])
+            call(['tar', '-zcf',
+                  str(Path(outdir, analysis_str+'volcano_charts.tar.gz')), #file to be created
+                  # change to the target dir so it doesn't include the path in the tar
+                  '-C', str(Path(outdir, analysis_str, 'volcano')), '.'])
+
 
         analyses_tups = []
         if not skip_jacks:
@@ -216,38 +221,42 @@ def run_analysis(fn_counts, fn_design_sheet, outdir, file_prefix, volc_labels=15
             pipeLOG.info(f'Doing comparisons of {analysis_str}')
             mahals = pd.DataFrame(index=analysis_tab.index)
             comparisons_done = False
-            for samp, comp in iter_comps(comptab.comps, analysis_tab):
+            for comp_to, comp_from in iter_comps(comptab.comps, analysis_tab):
                 comparisons_done = True
-                pipeLOG.info(f"\t{comp} vs {samp}")
+                pipeLOG.info(f"\t{comp_from} vs {comp_to}")
                 #scatter
 
 
-                scores_scatterplot(comp, samp, analysis_tab, label_pos=scatter_labels, label_neg=scatter_labels)
-                plt.title(f"{comp} vs {samp} ({ctrlgroup}, JACKS)")
+                scores_scatterplot(comp_from, comp_to, analysis_tab,
+                                   label_pos=scatter_labels, label_neg=scatter_labels,
+                                   dist_name='Mahalanobis distance')
+                plt.title(f"{comp_from} vs {comp_to} ({ctrlgroup}, JACKS)")
                 plt.savefig(str(
-                    Path(outdir, analysis_str, 'scatter', fnprefix+"{}_vs_{}.scatter.png".format(comp, samp))
+                    Path(outdir, analysis_str, 'scatter', fnprefix+"{}_vs_{}.scatter.png".format(comp_from, comp_to))
                 ), dpi=150)
                 plt.close()
 
                 # pop mahal table
-                A, B = analysis_tab[comp], analysis_tab[samp]
+                A, B = analysis_tab[comp_from], analysis_tab[comp_to]
                 _, _, mahal = mahal_nocov(A['jacks_score'], A['stdev'], B['jacks_score'], B['stdev'])
-                mahals.loc[:, f"{comp} vs {samp}"] = mahal
+                mahals.loc[:, f"{comp_from} vs {comp_to}"] = mahal
 
             if comparisons_done:
                 mahals.to_csv(Path(outdir, analysis_str, 'tables', fnprefix+f"mahalanobis_distances.csv"))
 
             # wipes over the one produced above if comptab exists.
             call(['tar', '-zcf', str(Path(outdir, analysis_str + 'scatter_charts.tar.gz')),
-                  str(Path(outdir, analysis_str, 'scatter'))])
+                  '-C', str(Path(outdir, analysis_str, 'scatter')), '.'])
+                    #str(Path(outdir, analysis_str, 'scatter'))])
             call(['tar', '-zcf', str(Path(outdir, analysis_str + 'tables.tar.gz')),
-              str(Path(outdir, analysis_str, 'tables'))])
+                  '-C', str(Path(outdir, analysis_str, 'tables')), '.'])
+            #str(Path(outdir, analysis_str, 'tables'))])
 
+    # Do all the mageck comparisons at the end as we need the NT->treat for significance
     if not skip_mageck:
         pipeLOG.info('Doing comparisons of mageck')
         mag_tables = {}
-        # get all the mageck tables available since we need to compare multiple
-        # (this dict should probably be built above)
+        # Get the tables
         for ctrlgroup in ctrl_groups:
             fnprefix = file_prefix + '.' + ctrlgroup + '.'
             mf_prefix = str(Path(outdir, 'mageck', 'files', fnprefix))
@@ -255,33 +264,41 @@ def run_analysis(fn_counts, fn_design_sheet, outdir, file_prefix, volc_labels=15
             mag_tables[ctrlgroup] = scores_mageck
 
         # go through each comparison pair and check for the existence of the right measures.
-        for samp, comp in iter_comps(comptab.comps):
+        for comp_to, comp_from in iter_comps(comptab.comps):
             lfc_tabs = []
             fdr_tabs = []
-            for grp, tab in mag_tables.items():
+            for ctrlgroup, tab in mag_tables.items():
                 # second of column headers is the sample in mageck
                 exp = pd.Series(tab.columns.levels[0], index=tab.columns.levels[0])
                 samps = set([c.split('-')[1] for c in exp])
-                if comp in samps and samp in samps:
-                    samphead = exp[exp.str.contains(samp)][0]
-                    comphead = exp[exp.str.contains(comp)][0]
-                    lfc_tabs.append((grp, samphead, comphead))
-                if f'{samp}-{comp}' in exp:
-                    fdr_tabs.append((grp, f'{samp}-{comp}'))
-                if f'{comp}-{samp}' in exp:
-                    fdr_tabs.append((grp, f'{comp}-{samp}'))
+                # so, if a comp is specified with NT->T then we want to use NT->T for fdr and
+                # ctrl->[NT/T] LFCs for the scatter, then name by ctrl.NT_T
+                if comp_from in samps and comp_to in samps:
+                    samphead = exp[exp.str.contains(comp_to)][0]
+                    comphead = exp[exp.str.contains(comp_from)][0]
+                    # some weird groups will exist as "ctrlgroup", so check the ctrls actually match
+                    if comphead.split('-')[0] == samphead.split('-')[0]:
+                        lfc_tabs.append((ctrlgroup, samphead, comphead))
+                if f'{comp_to}-{comp_from}' in exp:
+                    fdr_tabs.append((ctrlgroup, f'{comp_to}-{comp_from}'))
+                elif f'{comp_from}-{comp_to}' in exp:
+                    fdr_tabs.append((ctrlgroup, f'{comp_from}-{comp_to}'))
+                else: # no source of sig
+                    pipeLOG.info(f'{comp_from}->{comp_to} not possible, missing comparison.')
+                    continue
             # print(lfc_tabs)
             # print('**', fdr_tabs)
             for fdrtab, fdrexp in fdr_tabs:
-                for lfctab, samphead, comphead in lfc_tabs:
+                for ctrlgroup, samphead, comphead in lfc_tabs:
                     pipeLOG.info(f'MAgeck results comp using {samphead} {comphead}, {fdrexp}')
 
-                    scores_scatterplot(comphead, samphead, mag_tables[lfctab], True, scatter_labels, scatter_labels,
+                    scores_scatterplot(comphead, samphead, mag_tables[ctrlgroup], True, scatter_labels, scatter_labels,
                                        distance=mag_tables[fdrtab].loc[:, (fdrexp, 'fdr_log10')],
-                                       min_label_dist=0.3)
+                                       min_label_dist=0.3,
+                                       dist_name='log10(FDR)')
                     plt.title(f"{comphead} vs {samphead} (MAGeCK)")
                     plt.savefig(str(
-                        Path(outdir, 'mageck', 'scatter', file_prefix+".{}_vs_{}.scatter.png".format(comp, samp))
+                        Path(outdir, 'mageck', 'scatter', file_prefix+ '.' + ctrlgroup + ".{}_vs_{}.scatter.png".format(comp_from, comp_to))
                     ), dpi=150)
                     plt.close()
 

@@ -22,8 +22,10 @@ __version__ = 'v1.3.0'
 # fixed plot volcanos enrichment labeling
 
 
-#todo: pass through non numeric columns in SFN
 #todo; pass plot_volcano a filen string and it loads the table
+
+
+
 
 
 def drop_nonumeric(tab):
@@ -56,9 +58,8 @@ def size_factor_normalise(cnt_tab, log=True):
     log=True returns np.log2 of the counts."""
 
     cnt_tab = cnt_tab.copy()
-
+    out_tab = cnt_tab.copy()
     cnt_tab = drop_nonumeric(cnt_tab)
-
     cnt_tab = cnt_tab + 1
 
     # cnt_tab = cnt_tab.apply(np.log2)
@@ -71,7 +72,8 @@ def size_factor_normalise(cnt_tab, log=True):
     #norm_tab = norm_tab.apply(round)
     if log:
         norm_tab = norm_tab.apply(np.log2)
-    return norm_tab
+    out_tab.loc[:, norm_tab.columns] = norm_tab
+    return out_tab
 
 
 def plot_read_violins(tab, column_labs=None, log=True, size_norm=False, ax=None):
@@ -225,7 +227,7 @@ def plot_volcano(lfc, fdr, tab=None, title='', label_deplet=0, label_enrich=0,
             texts_done.append(lab)
             texts.append(plt.text(lfc[lab], fdr[lab], lab))
     # label additional genes
-    if other_labels:
+    if other_labels is not None:
         for lab in other_labels:
             if lab in texts_done:
                 continue
@@ -284,3 +286,4 @@ def tabulate_mageck(prefix):
     for exp, tab in tables.items():
         table[exp] = tab
     return table
+

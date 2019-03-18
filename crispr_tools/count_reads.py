@@ -7,8 +7,17 @@ from pathlib import Path, PosixPath, WindowsPath
 
 from typing import List
 
-__version__ = '1.3.1b2'
+"""Functions for counting and mapping reads from multiple FASTQ files
+to some kind of sequence library, e.g. a CRISPR guide library. 
+Assumes that FQ filenames are in the format {sample_name}_L???_R1_001.fastq[.gz]
+and that the sequence to be mapped is in the same position in every read.
+It's probably not very useful if either of these things are false.
 
+Produces dereplicated sequence counts (one file per sample) and then a single
+file containing reads mapped to guide/gene from a library file."""
+
+__version__ = '1.3.2'
+# 1.3.2 Bugfixes, documentation
 # 1.3.1 returned column order of map_counts now 'guide', 'gene', [everything else]
 #       fixed splitter issue
 # v1.3.0 added map_counts
@@ -21,8 +30,7 @@ __version__ = '1.3.1b2'
 # v1.2 filename prefix, removed directory walking, added merge_samples, removed merge_lanes
 # v1.1 added argument parsing, options to merge lanes
 
-#todo IMPORTANT make sure writing mapped counts works with single sample
-#todo just ouput a single file what
+#todo just ouput a single file
 #todo use **kwargs to pass parsed args to count_batch
 #todo use logging instead of stealing print
 

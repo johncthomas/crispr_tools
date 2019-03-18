@@ -12,15 +12,13 @@ except ModuleNotFoundError:
     def adjust_text(*args, **kwargs):
         pass
 from copy import copy
-__version__ = '0.6'
+__version__ = '0.7'
 
 #todo: sepfucntions for each table, one function that calls all, option to only return scores
 #todo subclass scores_table from DF, add functions as methods, plots, mahal, scores etc
 #todo: put eff and fold change on the same table (currently nans)
-#todo pass ax to plot2d
 #todo bootstrapping?
 #todo: write decent readme and documention for github
-#todo make scores scatterplot work with other distance methods
 
 # in 0.5
 # refactor "esstab" to "score_table"
@@ -101,7 +99,7 @@ def plot_volcano_from_scoretable(score_table, savefn=None, ax=None,
 
 def scores_scatterplot(x, y, table=None, distance_gradient=True, label_pos=0, label_neg=0,
                        distance:pd.Series=None, min_label_dist=0.5, min_label_diff=0.5,
-                        labels=None, formatters:List[dict]=None, ax=None) -> plt.Axes:
+                        labels=None, formatters=None, dist_name = None, ax=None) -> plt.Axes:
     """Produce biplot of 2 essentiality series.
     args:
         x, y:
@@ -159,15 +157,26 @@ def scores_scatterplot(x, y, table=None, distance_gradient=True, label_pos=0, la
     else:
         labels = copy(labels)
 
+    # deal with any nans
+    nans = (x_score.isna() | y_score.isna())
+    x_score, y_score = x_score.loc[~nans], y_score.loc[~nans]
+
     pos_genes, neg_genes = [], []
     if distance_gradient:
         if distance is None:
             _, _, distance = mahal_nocov(
                 x_score, table[x].stdev, y_score, table[y].stdev
             )
-
+        # no nans
+        distance = distance.loc[~distance.isna()]
         # get the genes to be labelled first
         distance = distance.sort_values()
+
+        # so that most distant points are plotted on top, order x and y by distance
+        x_score = x_score[distance.index]
+        y_score = y_score[distance.index]
+
+        # get most distance in the pos and neg directions
         # get most distance in the pos and neg directions
         if label_pos is True:
             label_pos = np.inf
@@ -228,6 +237,8 @@ def scores_scatterplot(x, y, table=None, distance_gradient=True, label_pos=0, la
         cb.set_ticks([0.0, 1.0])
         cb.set_ticklabels([str(round(min_dist, 2)),
                            str(round(max_dist, 2))])
+        if dist_name is not None:
+            cb.ax.set_ylabel(dist_name)
 
     # labels
     txt = []
@@ -261,7 +272,7 @@ def scores_scatterplot(x, y, table=None, distance_gradient=True, label_pos=0, la
         return fig, ax
 
 
-def tablulate_score(prefix):
+def tabulate_score(prefix):
     """Return a multiindexed DF of JACKS results.
 
     Table columns are sample names as given in the repmap at level 0,
@@ -321,7 +332,7 @@ def tabulate_jacks(prefix):
 
     kwtab = dict(sep='\t', index_col=0)
 
-    sig_df = tablulate_score(prefix)
+    sig_df = tabulate_score(prefix)
     samples = sig_df.columns.levels[0]
     # get guide data, foldchange and efficacies
     guide_cols = pd.MultiIndex.from_product((samples, ['foldchange', 'fold_std', 'eff', 'eff_std']),
