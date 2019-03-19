@@ -9,7 +9,7 @@ with open('./crispr_tools/version.txt') as f:
     __version__ = f.readline().replace('\n', '')
 
 setup(
-    name = 'crispr_tools',
+    name = 'crispr_tools_yamlbeta',
     version = __version__,
     author = 'John C. Thomas',
     author_email = 'jcthomas000@gmail.com',

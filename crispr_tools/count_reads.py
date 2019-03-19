@@ -250,7 +250,7 @@ def map_counts(fn_or_dir, lib, guidehdr='guide', genehdr='gene',
         rawcnt.loc[:, fn.name.split(splitter)[0]] = pd.read_table(fn, index_col=0, header=None).iloc[:, 0]
 
     rawcnt = rawcnt.fillna(0).astype(int)
-    # the abscent guides
+    # the absent guides
     missing = lib.loc[~lib.index.isin(rawcnt.index), :].index
 
     # get the present guides

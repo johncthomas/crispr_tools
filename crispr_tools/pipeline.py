@@ -316,35 +316,37 @@ def iter_comps(comp_series: pd.Series, tab: pd.DataFrame=None):
                 yield samp, comp
 
 
+
+
 if __name__ == '__main__':
     print(__version__)
-    parser = argparse.ArgumentParser(
-        description="Run mageck and jacks analyses using a design_sheet.xlsx and counts.tsv"
-    )
-    parser.add_argument('fn_counts', metavar='COUNTS', help='Path to counts file')
-    parser.add_argument('fn_design_sheet', metavar='REPMAP',
-                        help='Path to excel file containing repmaps etc.')
-    parser.add_argument('outdir', metavar='OUTDIR', help='Path to where results files will be stored, a '
-                        "directory structure will be created.")
-    parser.add_argument('file_prefix', metavar='PREFIX', help="String to form identifying prefix for all files generated.")
-    parser.add_argument('-v', '--volc-labels',dest='volc_labels', metavar='N', type=int, default=30,
-                        help="Number of depleted/enriched genes to label in volcano charts.")
-    parser.add_argument('-s', '--scatter-labels', metavar='N', type=int, default=10, dest='scatter_labels',
-                        help="Number of genes to label on either side of The Line in scatter charts.")
-    parser.add_argument('--charts-only', action='store_true', default=False,
-                        help="Don't run MAGeCK or JACKS, just produce plots with existing files.")
-    parser.add_argument('-j', '--jacks-efficacy', metavar='EFF_FILE', dest='jacks_eff_fn',
-                        help='Path to efficacy file to be used in JACKS analysis. '
-                             'If the provided string contains {}, the repmap ctrl group will be substituted'
-                             'into the filename. Optional.')
-    parser.add_argument('--skip-jacks', action='store_true', dest='skip_jacks',
-                        help="don't run JACKS analysis or try to plot from JACKS analyses")
-    parser.add_argument('--skip-mageck', action='store_true', dest='skip_mageck',
-                        help="don't run MAGeCK analysis or try to plot from MAGeCK analyses")
-    parser.add_argument('--dont-log', action='store_true', dest='dont_log',
-                        help="Don't write a log file.")
-    clargs = parser.parse_args()
-    run_analysis(**vars(clargs))
+    # parser = argparse.ArgumentParser(
+    #     description="Run mageck and jacks analyses using a design_sheet.xlsx and counts.tsv"
+    # )
+    # parser.add_argument('fn_counts', metavar='COUNTS', help='Path to counts file')
+    # parser.add_argument('fn_design_sheet', metavar='REPMAP',
+    #                     help='Path to excel file containing repmaps etc.')
+    # parser.add_argument('outdir', metavar='OUTDIR', help='Path to where results files will be stored, a '
+    #                     "directory structure will be created.")
+    # parser.add_argument('file_prefix', metavar='PREFIX', help="String to form identifying prefix for all files generated.")
+    # parser.add_argument('-v', '--volc-labels',dest='volc_labels', metavar='N', type=int, default=30,
+    #                     help="Number of depleted/enriched genes to label in volcano charts.")
+    # parser.add_argument('-s', '--scatter-labels', metavar='N', type=int, default=10, dest='scatter_labels',
+    #                     help="Number of genes to label on either side of The Line in scatter charts.")
+    # parser.add_argument('--charts-only', action='store_true', default=False,
+    #                     help="Don't run MAGeCK or JACKS, just produce plots with existing files.")
+    # parser.add_argument('-j', '--jacks-efficacy', metavar='EFF_FILE', dest='jacks_eff_fn',
+    #                     help='Path to efficacy file to be used in JACKS analysis. '
+    #                          'If the provided string contains {}, the repmap ctrl group will be substituted'
+    #                          'into the filename. Optional.')
+    # parser.add_argument('--skip-jacks', action='store_true', dest='skip_jacks',
+    #                     help="don't run JACKS analysis or try to plot from JACKS analyses")
+    # parser.add_argument('--skip-mageck', action='store_true', dest='skip_mageck',
+    #                     help="don't run MAGeCK analysis or try to plot from MAGeCK analyses")
+    # parser.add_argument('--dont-log', action='store_true', dest='dont_log',
+    #                     help="Don't write a log file.")
+    # clargs = parser.parse_args()
+    # run_analysis(**vars(clargs))
     # os.chdir('/Users/johnc.thomas/Dropbox/crispr/screens_analysis/matylda_HS715-20')
     # run_analysis(**{'fn_counts': '/Users/johnc.thomas/Dropbox/crispr/counts_all/matylda_HS715-20.counts.tsv',
     #  'fn_repmap': 'matylda_HS715-20.repmap.3.xlsx', 'outdir': 'take5', 'file_prefix': 'HS715-20', 'labeldep': 30,
