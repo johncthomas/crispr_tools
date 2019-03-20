@@ -18,5 +18,6 @@ setup(
         'numpy', 'scipy', 'matplotlib', 'pandas', 'jacks', 'xlrd', 'shapely'
     ],
     python_requires = '>=3.6',
-    data_files=['crispr_tools/version.txt',]
+
+    include_package_data=True,
 )
