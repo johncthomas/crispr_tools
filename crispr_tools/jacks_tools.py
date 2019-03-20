@@ -12,7 +12,6 @@ except ModuleNotFoundError:
     def adjust_text(*args, **kwargs):
         pass
 from copy import copy
-__version__ = '0.7'
 
 #todo: sepfucntions for each table, one function that calls all, option to only return scores
 #todo subclass scores_table from DF, add functions as methods, plots, mahal, scores etc
@@ -20,8 +19,6 @@ __version__ = '0.7'
 #todo bootstrapping?
 #todo: write decent readme and documention for github
 
-# in 0.5
-# refactor "esstab" to "score_table"
 
 def plot_volcano_from_scoretable(score_table, savefn=None, ax=None,
                  label_deplet = 0, label_enrich = 0, other_labels=None,
@@ -96,10 +93,9 @@ def plot_volcano_from_scoretable(score_table, savefn=None, ax=None,
         return ax
 
 
-
 def scores_scatterplot(x, y, table=None, distance_gradient=True, label_pos=0, label_neg=0,
-                       distance:pd.Series=None, min_label_dist=0.5, min_label_diff=0.5,
-                        labels=None, formatters=None, dist_name = None, ax=None) -> plt.Axes:
+                       distance: pd.Series = None, min_label_dist=0.5, min_label_diff=0.5,
+                       labels=None, dist_name=None, ax=None) -> plt.Axes:
     """Produce biplot of 2 essentiality series.
     args:
         x, y:
@@ -113,6 +109,11 @@ def scores_scatterplot(x, y, table=None, distance_gradient=True, label_pos=0, la
         labels:
             list of gene names to be labeled on the plot
 
+        Distance:
+            Optionally supply an ORDERED distance with indices shared with
+            the x/y values to be ploted. Negative values should be used to
+            label points below the line.
+
         mahal_gradient:
             if True points will be colored by mahal value.
 
@@ -122,22 +123,12 @@ def scores_scatterplot(x, y, table=None, distance_gradient=True, label_pos=0, la
         minlabel:
             minimum abs(mahal) for labels to be applied by label_pos/neg
 
-        formatters:
-            list of tuples as below. format_dict is passed to
-            plt.plot(..., **format_dict).
-                [(list_of_genes, format_dict), ...]
-
     returns fig, ax if ax=None, otherwise the supplied ax is returnd."""
 
-    # required changes;
-    #   distance optionally supplied
-    #   optional filter by abs(x-y)>threshold (use minlabel...?)
-    #   remove refs to jacks_score
 
-
-    fig=None
+    fig = None
     if ax is None:
-        fig, ax = plt.subplots(1, 1, figsize=(8,8))
+        fig, ax = plt.subplots(1, 1, figsize=(8, 8))
 
     if table is None:
         x_score = x
@@ -148,7 +139,7 @@ def scores_scatterplot(x, y, table=None, distance_gradient=True, label_pos=0, la
             if k in cols:
                 break
         else:
-            raise ValueError('No score column found in '+str(cols))
+            raise ValueError('No score column found in ' + str(cols))
         x_score = table[x][k]
         y_score = table[y][k]
 
@@ -167,14 +158,7 @@ def scores_scatterplot(x, y, table=None, distance_gradient=True, label_pos=0, la
             _, _, distance = mahal_nocov(
                 x_score, table[x].stdev, y_score, table[y].stdev
             )
-        # no nans
-        distance = distance.loc[~distance.isna()]
-        # get the genes to be labelled first
-        distance = distance.sort_values()
-
-        # so that most distant points are plotted on top, order x and y by distance
-        x_score = x_score[distance.index]
-        y_score = y_score[distance.index]
+            distance = distance.sort_values()
 
         # get most distance in the pos and neg directions
         # get most distance in the pos and neg directions
@@ -188,19 +172,21 @@ def scores_scatterplot(x, y, table=None, distance_gradient=True, label_pos=0, la
         pos_genes = distance.loc[(distance > min_label_dist) & diff_mask].tail(label_pos).index
         neg_genes = distance.loc[(distance < 0 - min_label_dist) & diff_mask].head(label_neg).index
 
+        # use absolute distance for gradient, sort so most extreme values plotted on top
+        distance = distance.apply(abs).sort_values()
+        # print(distance.head())
+        # put scores in teh same order as indexes are lost below.
+        x_score = x_score.loc[distance.index]
+        y_score = y_score.loc[distance.index]
 
-        # for gradient we don't care about pos/neg
-        # but we do want the order to match x_score as the index will be lost
-        distance = distance.reindex(x_score.index).abs()
+        # normalised (zero to one) distance for color scaling
         max_dist = max(distance)
-
-        # normalised mahaladonis for color scaling
         if distance_gradient is True:
             min_dist = 0
         else:
             min_dist = distance_gradient
-        norm_dist = (distance-min_dist)/(max_dist-min_dist)
-        colrs = cm.viridis(norm_dist) # loses the gene name indicies
+        norm_dist = (distance - min_dist) / (max_dist - min_dist)
+        colrs = cm.viridis(norm_dist)  # loses the gene name indicies
         # RGBA
         grey = (0.68, 0.68, 0.68, 1)
         for i, m in enumerate(norm_dist):
@@ -208,18 +194,11 @@ def scores_scatterplot(x, y, table=None, distance_gradient=True, label_pos=0, la
             if m < 0:
                 colrs[i] = grey
     else:
-        colrs = None
+        colrs = 'b'
 
     labels.extend(pos_genes)
     labels.extend(neg_genes)
-    #print(labels)
-    if not formatters:
-        # all genes with empty format spec
-        formatters = [(x_score.index, {})]
-    for genes, formats in formatters:
-        if 'marker' not in formats:
-            formats['marker'] ='o'
-        plt.scatter(x_score.loc[genes], y_score.loc[genes], c=colrs, **formats)
+    plt.scatter(x_score, y_score, c=colrs)
 
     # plot a square Axes with orientation lines
     lim = ax.axis()
@@ -245,24 +224,24 @@ def scores_scatterplot(x, y, table=None, distance_gradient=True, label_pos=0, la
     # label significants and control
     if labels:
         for lab in set(labels):
-            #txt.append(plt.text(x_score[lab], y_score[lab], lab))
+            # txt.append(plt.text(x_score[lab], y_score[lab], lab))
             txt.append(
                 plt.annotate(
                     lab,
                     (x_score[lab], y_score[lab]),
-                    #bbox=dict(boxstyle='round,pad=0.1', fc='yellow', alpha=0.3),
-                    arrowprops=dict(arrowstyle='->', color='#ff8533' )
+                    # bbox=dict(boxstyle='round,pad=0.1', fc='yellow', alpha=0.3),
+                    arrowprops=dict(arrowstyle='->', color='#ff8533')
                 )
             )
 
     # label axes
     if table is not None:
-        plt.xlabel(x+' '+k)
-        plt.ylabel(y +' '+k)
+        plt.xlabel(x + ' ' + k)
+        plt.ylabel(y + ' ' + k)
 
     avoid_points = True if distance_gradient is True else False
     if avoid_points:
-        adjust_text(txt, x_score, y_score, force_points=(0.2,0.25))
+        adjust_text(txt, x_score, y_score, force_points=(0.2, 0.25))
     else:
         adjust_text(txt, expand_text=(1.1, 1.2), )
 
@@ -434,13 +413,27 @@ def mahal_nocov(xs, xs_sd, ys, ys_sd, line_gi = (1,0), **cp_kwargs):
     return euc_dist, ps, pd.Series(mahal_dist)
 
 
+def test():
+    comphead = 'A_48h-A_DMSO'
+    samphead = 'A_48h-A_IC10'
 
-# from crispr_tools.tools import tabulate_mageck
-# import os
-# os.chdir('/Users/johnc.thomas/Dropbox/crispr/screens_analysis')
-# tab = tabulate_mageck('/Users/johnc.thomas/Dropbox/crispr/screens_analysis/scattertst/tst.')
-#
-# scores_scatterplot('B1-vs-B0', 'B2-vs-B0', tab,True, 5,5, distance=tab['B1-vs-B2'].fdr_log10, min_label_diff=0)
-# plt.show()
+    from crispr_tools.tools import tabulate_mageck
+    tablfc = tabulate_mageck('/Users/johnc.thomas/Dropbox/crispr/screens_analysis/rebecca.601-2_608-9/take2_fixed_counts/mageck/files/reb_601-9.D2.')
+    tabfdr = tabulate_mageck('/Users/johnc.thomas/Dropbox/crispr/screens_analysis/rebecca.601-2_608-9/take2_fixed_counts/mageck/files/reb_601-9.NT.')
+    tabfdr.head(3)
 
+    x, y = [tablfc[k].lfc for k in (comphead, samphead)]
+    nans = (x.isna() | y.isna())
+    x, y = x.loc[~nans], y.loc[~nans]
+    distance = tabfdr['A_DMSO-A_IC10']
+    distance = distance.reindex(x.index)
+    distance.fillna(0, inplace=True)
+    distance.loc[distance.lfc < 0, 'fdr_log10'] = 0 -distance.loc[distance.lfc < 0, 'fdr_log10']
 
+    distance = distance.sort_values(['fdr_log10', 'lfc'])
+
+    scores_scatterplot(comphead, samphead, tablfc, True, 5,5,
+                       distance=distance.fdr_log10,
+                       min_label_dist=0.5,
+                       dist_name='log10(FDR)')
+    plt.show()

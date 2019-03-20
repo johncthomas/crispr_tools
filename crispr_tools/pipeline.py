@@ -291,10 +291,21 @@ def run_analysis(fn_counts, fn_design_sheet, outdir, file_prefix, volc_labels=15
             for fdrtab, fdrexp in fdr_tabs:
                 for ctrlgroup, samphead, comphead in lfc_tabs:
                     pipeLOG.info(f'MAgeck results comp using {samphead} {comphead}, {fdrexp}')
+                    x, y = [mag_tables[ctrlgroup][k].lfc for k in (comphead, samphead)]
+                    nans = (x.isna() | y.isna())
+                    x, y = x.loc[~nans], y.loc[~nans]
+                    distance = mag_tables[fdrtab][fdrexp].loc[:, ['lfc', 'fdr_log10']]
+                    distance = distance.reindex(x.index)
+                    distance.fillna(0, inplace=True)
+                    print(distance.columns,'fff')
+
+                    distance.loc[distance.lfc < 0, 'fdr_log10'] = 0 - distance.loc[distance.lfc < 0, 'fdr_log10']
+
+                    distance = distance.sort_values(['fdr_log10', 'lfc'])
 
                     scores_scatterplot(comphead, samphead, mag_tables[ctrlgroup], True, scatter_labels, scatter_labels,
-                                       distance=mag_tables[fdrtab].loc[:, (fdrexp, 'fdr_log10')],
-                                       min_label_dist=0.3,
+                                       distance=distance.fdr_log10,
+                                       min_label_dist=0.5,
                                        dist_name='log10(FDR)')
                     plt.title(f"{comphead} vs {samphead} (MAGeCK)")
                     plt.savefig(str(
@@ -345,7 +356,3 @@ if __name__ == '__main__':
                         help="Don't write a log file.")
     clargs = parser.parse_args()
     run_analysis(**vars(clargs))
-    # os.chdir('/Users/johnc.thomas/Dropbox/crispr/screens_analysis/matylda_HS715-20')
-    # run_analysis(**{'fn_counts': '/Users/johnc.thomas/Dropbox/crispr/counts_all/matylda_HS715-20.counts.tsv',
-    #  'fn_repmap': 'matylda_HS715-20.repmap.3.xlsx', 'outdir': 'take5', 'file_prefix': 'HS715-20', 'labeldep': 30,
-    #  'labelenr': 10, 'charts_only': False})
