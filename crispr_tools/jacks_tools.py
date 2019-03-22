@@ -437,3 +437,5 @@ def test():
                        min_label_dist=0.5,
                        dist_name='log10(FDR)')
     plt.show()
+
+#test()
