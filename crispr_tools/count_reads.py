@@ -16,7 +16,8 @@ It's probably not very useful if either of these things are false.
 Produces dereplicated sequence counts (one file per sample) and then a single
 file containing reads mapped to guide/gene from a library file."""
 
-__version__ = '1.3.2'
+__version__ = '1.3.3'
+# 1.3.3 fixed mapping so it properly truncates the filename to sample name
 # 1.3.2 Bugfixes, documentation
 # 1.3.1 returned column order of map_counts now 'guide', 'gene', [everything else]
 #       fixed splitter issue
@@ -217,7 +218,7 @@ def count_batch(fn_or_dir, slicer, fn_prefix='', seq_len=None, seq_offset=0, fn_
 
 def map_counts(fn_or_dir, lib, guidehdr='guide', genehdr='gene',
                drop_unmatched=False, report=False, splitter='.raw',
-               remove_text = '', out_fn=None):
+               remove_prefix=True, out_fn=None):
     """lib needs to be indexed by guide sequence. If it's not a DF a DF will
     be loaded and indexed by 'seq' or the first column. Returns a DF indexed
     by 'guide' with 'gene' as the second column.
@@ -247,7 +248,11 @@ def map_counts(fn_or_dir, lib, guidehdr='guide', genehdr='gene',
     # get single table of counts
     for fn in file_list:
         # filtering of fn done before here
-        rawcnt.loc[:, fn.name.split(splitter)[0]] = pd.read_table(fn, index_col=0, header=None).iloc[:, 0]
+        sn = fn.name.split(splitter)[0]
+        if remove_prefix:
+            sn = sn.split('.')[1]
+        print('sample header:', sn)
+        rawcnt.loc[:, sn] = pd.read_table(fn, index_col=0, header=None).iloc[:, 0]
 
     rawcnt = rawcnt.fillna(0).astype(int)
     # the absent guides
@@ -326,9 +331,8 @@ if __name__ == '__main__':
     written_fn = count_batch(clargs.files, slicer, clargs.p, None, 0, clargs.f, clargs.fn_split, clargs.merge_samples,
                 clargs.just_go, clargs.quiet)
     if clargs.library:
-        # remove file prefix
-        fpref = Path(clargs.p).stem.split('.')[1]
-        map_counts(written_fn, clargs.library, drop_unmatched=True, report=True, remove_text=fpref,
+
+        map_counts(written_fn, clargs.library, drop_unmatched=True, report=True, remove_prefix=True,
                    out_fn=clargs.p+'.counts.tsv', splitter=clargs.f)
 
 
