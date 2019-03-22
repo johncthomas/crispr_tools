@@ -15,8 +15,9 @@ setup(
     author_email = 'jcthomas000@gmail.com',
     packages=find_packages(exclude=['contrib', 'docs', 'tests']),
     install_requires = [
-        'numpy', 'scipy', 'matplotlib', 'pandas', 'jacks', 'xlrd', 'shapely'
+        'numpy', 'scipy', 'matplotlib', 'pandas', 'jacks', 'xlrd', 'shapely', 'pyyaml'
     ],
     python_requires = '>=3.6',
-    data_files=['crispr_tools/version.txt',]
+
+    include_package_data=True,
 )
