@@ -9,13 +9,13 @@ with open('./crispr_tools/version.txt') as f:
     __version__ = f.readline().replace('\n', '')
 
 setup(
-    name = 'crispr_tools_yamlbeta',
+    name = 'crispr_tools',
     version = __version__,
     author = 'John C. Thomas',
     author_email = 'jcthomas000@gmail.com',
     packages=find_packages(exclude=['contrib', 'docs', 'tests']),
     install_requires = [
-        'numpy', 'scipy', 'matplotlib', 'pandas', 'jacks', 'xlrd', 'shapely'
+        'numpy', 'scipy', 'matplotlib', 'pandas', 'jacks', 'xlrd', 'shapely', 'pyyaml'
     ],
     python_requires = '>=3.6',
 
