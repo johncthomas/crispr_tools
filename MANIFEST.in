@@ -1,3 +1,2 @@
-include crispr_tools/version.txt
 include crispr_tools/tests/test_counts.tsv
 include crispr_tools/tests/test_pipeline.yaml

@@ -24,10 +24,6 @@ __version__ = 'v1.3.0'
 
 #todo; pass plot_volcano a filen string and it loads the table
 
-
-
-
-
 def drop_nonumeric(tab):
     nonumeric = tab.columns[tab.iloc[0, :].apply(type) == str]
     if len(nonumeric) > 0:
@@ -115,7 +111,7 @@ def plot_ROC(tab, things_oi, label=None, ax = None):
     if ax is None:
         _, ax = plt.subplots(1,1, figsize=(4,4))
     else:
-        plt.gca(ax)
+        plt.sca(ax)
     tab = tab.copy()
     things_oi = things_oi[things_oi.isin(tab.index)]
     #print(things_oi)
@@ -218,7 +214,7 @@ def plot_volcano(lfc, fdr, tab=None, title='', label_deplet=0, label_enrich=0,
 
     # get tails from ascending order
     dep = tab.loc[depmask, :].sort_values(lfc_lab, ascending=False).sort_values(fdr_lab).tail(label_deplet)[fdr_lab]
-    enr = tab.loc[enrmask, :].sort_values([fdr_lab, lfc_lab]).tail(label_deplet)[fdr_lab]
+    enr = tab.loc[enrmask, :].sort_values([fdr_lab, lfc_lab]).tail(label_enrich)[fdr_lab]
     # label the tails
     for end in dep, enr:
         for lab, an_fdr in end.items():

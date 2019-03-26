@@ -13,8 +13,8 @@ import matplotlib.pyplot as plt
 
 from jacks.jacks_io import runJACKS
 
-with open(pathlib.Path(__file__).parent/'version.txt') as f:
-    __version__ = f.readline().replace('\n', '')
+# with open(pathlib.Path(__file__).parent/'version.txt') as f:
+#     __version__ = f.readline().replace('\n', '')
 
 pipeLOG = logging.getLogger('pipeline')
 pipeLOG.setLevel(logging.INFO)
@@ -26,6 +26,7 @@ logging.getLogger('matplotlib').setLevel(logging.WARNING)
 #from crispr_tools.count_reads import count_reads, count_batch, map_counts
 from crispr_tools.tools import plot_read_violins, plot_ROC, plot_volcano, tabulate_mageck, plot_volcano_from_mageck
 from crispr_tools.jacks_tools import tabulate_score, scores_scatterplot, mahal_nocov
+from crispr_tools.version import __version__
 
 #todo add sample labels to sample_details for nice chart labels
 #todo format of log filename
@@ -34,7 +35,6 @@ from crispr_tools.jacks_tools import tabulate_score, scores_scatterplot, mahal_n
 """Go from FastQ files to completed JACKS/MAGeCK analysis. 
 fq->mapped_counts&violin plots are one command (count_reads.count_batch() ) 
 counts->charts&tables another."""
-
 
 
 def call_magecks(fn_counts, fn_repmap, outprefix):
@@ -316,6 +316,9 @@ def run_analysis(fn_counts, outdir, file_prefix,
                         Path(outdir, 'mageck', 'scatter', file_prefix+ '.' + ctrlgroup + ".{}_vs_{}.scatter.png".format(comp_from, comp_to))
                     ), dpi=150)
                     plt.close()
+
+    import shutil
+    shutil.copy(fn_counts, Path(outdir, Path(fn_counts).name))
 
     pipeLOG.info("Done. "+str(datetime.datetime.now()))
 

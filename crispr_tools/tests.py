@@ -1,4 +1,4 @@
-from pipeline import *
+from crispr_pipeline import *
 from shutil import rmtree
 import os
 

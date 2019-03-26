@@ -2,11 +2,17 @@ from setuptools import setup, find_packages
 # from os import path
 # import os
 
-#todo use yaml instead of xlsx and remove xlrd requirement
 #todo remove shapely requirement from mahal calc
 
-with open('./crispr_tools/version.txt') as f:
-    __version__ = f.readline().replace('\n', '')
+with open('./crispr_tools/version.py') as f:
+    v = f.readline()
+    # account for either string char
+    if '"' in v:
+        sep = '"'
+    else:
+        sep = "'"
+    __version__ = v.split(sep)[-2]
+
 
 setup(
     name = 'crispr_tools',
@@ -15,9 +21,9 @@ setup(
     author_email = 'jcthomas000@gmail.com',
     packages=find_packages(exclude=['contrib', 'docs', 'tests']),
     install_requires = [
-        'numpy', 'scipy', 'matplotlib', 'pandas', 'jacks', 'xlrd', 'shapely', 'pyyaml'
+        'numpy', 'scipy', 'matplotlib', 'pandas', 'jacks','shapely', 'pyyaml'
     ],
     python_requires = '>=3.6',
-
+    scripts=['crispr_tools/crispr_pipeline.py',],
     include_package_data=True,
 )
