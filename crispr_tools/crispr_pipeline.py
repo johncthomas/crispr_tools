@@ -4,14 +4,19 @@ import logging, os, pathlib, datetime, inspect, argparse, sys, yaml
 from typing import List, Dict
 
 from copy import copy
-from subprocess import call
+from subprocess import call, check_output
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-
-from jacks.jacks_io import runJACKS
+try:
+    from jacks.jacks_io import runJACKS
+except ImportError:
+    print('To run jacks you need to install JACKS,\n', 'https://github.com/felicityallen/JACKS/tree/master/jacks\n' 
+          "You can still run Mageck though, if it's installed.")
+    def runJACKS(*a, **k):
+        raise ModuleNotFoundError('JACKS not installed!!!')
 
 # with open(pathlib.Path(__file__).parent/'version.txt') as f:
 #     __version__ = f.readline().replace('\n', '')
@@ -94,9 +99,10 @@ def run_analysis(fn_counts, outdir, file_prefix,
 
     pipeLOG.info('Version = '+__version__)
     pipeLOG.info('Working dir = '+os.getcwd())
+    pipeLOG.info('outdir = '+outdir)
     call(['mkdir', outdir])
     if not dont_log:
-        t = str(datetime.datetime.now()).replace(' ', '_').replace('/', '|')
+        t = '{}-{}-{}_{}h{}m{}s.{}'.format(*datetime.datetime.now().timetuple()[:-1])
         set_logger(str(Path(outdir, file_prefix + f'log_{t}.txt')))
 
     frame = inspect.currentframe()
@@ -121,7 +127,6 @@ def run_analysis(fn_counts, outdir, file_prefix,
         pipeLOG.info(f'\nRunning {ctrlgroup}, writing to {fnprefix}')
         jmode_prefix = str(Path(outdir, 'jacks_mode', 'files', fnprefix))
         jmed_prefix = str(Path(outdir, 'jacks_median', 'files', fnprefix))
-
         mf_prefix = str(Path(outdir, 'mageck', 'files', fnprefix))
 
         # make the jacks repmap: rep, samp, ctrl
@@ -135,13 +140,13 @@ def run_analysis(fn_counts, outdir, file_prefix,
                     # print([rep, samp, ctrl])
                     del rep
                 del treat
-
-        with open(outdir+'tmp.repmap.tsv', 'w') as f:
+        repmap_fn = outdir+ctrlgroup+'.repmap.tsv'
+        with open(repmap_fn, 'w') as f:
             for line in reptab:
                 f.write('\t'.join(line)+'\n')
 
         if not charts_only and not skip_jacks:
-            pipeLOG.info("Running JACKS, mode and median normalised")
+            pipeLOG.info(f"Running JACKS, mode and median normalised with {repmap_fn}")
             if jacks_eff_fn:
                 jacks_eff = jacks_eff_fn.format(ctrlgroup)
                 if os.path.isfile(jacks_eff):
@@ -152,7 +157,7 @@ def run_analysis(fn_counts, outdir, file_prefix,
             else:
                 jacks_eff = None
 
-            jacks_args = (fn_counts, outdir+'tmp.repmap.tsv', fn_counts, 'rep', 'samp', None, 'ctrl', 'guide', 'gene',)
+            jacks_args = (fn_counts, repmap_fn, fn_counts, 'rep', 'samp', None, 'ctrl', 'guide', 'gene',)
             #jacks_kwargs =  dict()
             runJACKS(*jacks_args, norm_type='mode', outprefix=jmode_prefix, reffile=jacks_eff)
             runJACKS(*jacks_args, norm_type='median', outprefix=jmed_prefix, reffile=jacks_eff)
@@ -161,7 +166,8 @@ def run_analysis(fn_counts, outdir, file_prefix,
         # *run MAGECK
         if not charts_only and not skip_mageck:
             mageck_str = "mageck test -k {counts} -t {treat} -c {ctrl} -n {outprefix}{ctrlnm}-{sampnm}"
-            pipeLOG.info('Running MAGeCK')
+
+            pipeLOG.info('Running MAGeCK version '+check_output(["mageck","-v"]).decode())
             for ctrl_samp, treat_samps in ctrlmap.items():
                 for treat in treat_samps:
                     if treat == ctrl_samp:
@@ -177,7 +183,8 @@ def run_analysis(fn_counts, outdir, file_prefix,
                         ctrlnm=ctrl_samp,
                         sampnm=treat
                     )
-                    call(s, shell=True, )
+                    pipeLOG.info(s)
+                    call(s.split())
 
 
         analyses_used = []
@@ -189,15 +196,19 @@ def run_analysis(fn_counts, outdir, file_prefix,
                                   ('jacks_median', 'jacks_score', scoresmed)])
             if not charts_only:
                 pipeLOG.info('Writing JACKS tables')
-                scoresmode.to_csv(str(Path(outdir, 'jacks_mode', 'tables', fnprefix+'jacks_scores.csv')))
-                scoresmed.to_csv(str(Path(outdir, 'jacks_median', 'tables', fnprefix + 'jacks_scores.csv')))
+                modfn = str(Path(outdir, 'jacks_mode', 'tables', fnprefix+'jacks_scores.csv'))
+                medfn = str(Path(outdir, 'jacks_median', 'tables', fnprefix + 'jacks_scores.csv'))
+                pipeLOG.info('Writing: '+modfn+'\n\t& '+medfn)
+                scoresmode.to_csv(modfn)
+                scoresmed.to_csv(medfn)
 
         if not skip_mageck:
             scores_mageck = tabulate_mageck(mf_prefix)
             analyses_used.append(('mageck', 'lfc', scores_mageck))
             if not charts_only:
-                pipeLOG.info('Writing MAGeCK tables')
-                scores_mageck.to_csv(str(Path(outdir, 'mageck', 'tables', fnprefix+'mageck_table.csv')))
+                magfn = str(Path(outdir, 'mageck', 'tables', fnprefix + 'mageck_table.csv'))
+                pipeLOG.info('Writing MAGeCK tables '+magfn)
+                scores_mageck.to_csv(magfn)
 
         #volcano charts of all
         # use the universal one, have label options as part of args, maybe as a dict.
@@ -219,10 +230,10 @@ def run_analysis(fn_counts, outdir, file_prefix,
                 )
                 plt.close()
 
-            call(['tar', '-zcf',
-                  str(Path(outdir, analysis_str+'volcano_charts.tar.gz')), #file to be created
-                  # change to the target dir so it doesn't include the path in the tar
-                  '-C', str(Path(outdir, analysis_str, 'volcano')), '.'])
+            # call(['tar', '-zcf',
+            #       str(Path(outdir, analysis_str+'volcano_charts.tar.gz')), #file to be created
+            #       # change to the target dir so it doesn't include the path in the tar
+            #       '-C', str(Path(outdir, analysis_str, 'volcano')), '.'])
 
 
         analyses_tups = []
@@ -246,9 +257,11 @@ def run_analysis(fn_counts, outdir, file_prefix,
                                    label_pos=scatter_labels, label_neg=scatter_labels,
                                    dist_name='Mahalanobis distance')
                 plt.title(f"{comp_from} vs {comp_to} ({ctrlgroup}, JACKS)")
-                plt.savefig(str(
+                fn = str(
                     Path(outdir, analysis_str, 'scatter', fnprefix+"{}_vs_{}.scatter.png".format(comp_from, comp_to))
-                ), dpi=150)
+                )
+                pipeLOG.info('Writing: '+fn)
+                plt.savefig(fn, dpi=150)
                 plt.close()
 
                 # pop mahal table
@@ -257,15 +270,17 @@ def run_analysis(fn_counts, outdir, file_prefix,
                 mahals.loc[:, f"{comp_from} vs {comp_to}"] = mahal
 
             if comparisons_done:
-                mahals.to_csv(Path(outdir, analysis_str, 'tables', fnprefix+f"mahalanobis_distances.csv"))
+                mahalfn = Path(outdir, analysis_str, 'tables', fnprefix+f"mahalanobis_distances.csv")
+                pipeLOG.info('Writing: '+str(mahalfn))
+                mahals.to_csv(mahalfn)
 
-            # wipes over the one produced above if comptab exists.
-            call(['tar', '-zcf', str(Path(outdir, analysis_str + 'scatter_charts.tar.gz')),
-                  '-C', str(Path(outdir, analysis_str, 'scatter')), '.'])
-                    #str(Path(outdir, analysis_str, 'scatter'))])
-            call(['tar', '-zcf', str(Path(outdir, analysis_str + 'tables.tar.gz')),
-                  '-C', str(Path(outdir, analysis_str, 'tables')), '.'])
-            #str(Path(outdir, analysis_str, 'tables'))])
+            # # wipes over the one produced above if comptab exists.
+            # call(['tar', '-zcf', str(Path(outdir, analysis_str + 'scatter_charts.tar.gz')),
+            #       '-C', str(Path(outdir, analysis_str, 'scatter')), '.'])
+            #         #str(Path(outdir, analysis_str, 'scatter'))])
+            # call(['tar', '-zcf', str(Path(outdir, analysis_str + 'tables.tar.gz')),
+            #       '-C', str(Path(outdir, analysis_str, 'tables')), '.'])
+            # #str(Path(outdir, analysis_str, 'tables'))])
 
     # Do all the mageck comparisons at the end as we need the NT->treat for significance
     if not skip_mageck:
@@ -312,9 +327,11 @@ def run_analysis(fn_counts, outdir, file_prefix,
                                        min_label_dist=0.3,
                                        dist_name='log10(FDR)')
                     plt.title(f"{ctrl_header} vs {treat_header} (MAGeCK)")
-                    plt.savefig(str(
+                    fn = str(
                         Path(outdir, 'mageck', 'scatter', file_prefix+ '.' + ctrlgroup + ".{}_vs_{}.scatter.png".format(comp_from, comp_to))
-                    ), dpi=150)
+                    )
+                    pipeLOG.info('Writing: '+fn)
+                    plt.savefig(fn, dpi=150)
                     plt.close()
 
     import shutil
@@ -343,40 +360,41 @@ def iter_comps(comparisons: List[dict], tab: pd.DataFrame=None):
                         continue
                 yield ctrl_samp, comp
 
+def process_yaml(fn):
+    # arguments = yaml.safe_load(open('/Users/johnc.thomas/Dropbox/crispr/pycharm/jts_crispr_processing/crispr_tools_yaml/tests/test_pipeline.yaml'))
+    arguments = yaml.safe_load(open(fn))
+    # print(arguments)
+    # repmaps = arguments['repmap']
+    samples = arguments['sample_reps'].keys()
+    controls = arguments['controls']
+    for ctrl_grp, ctrlmap in controls.items():
+        for ctrl, samps in ctrlmap.items():
+            if samps == 'ALL':
+                samps = copy(list(samples))
+            elif type(samps) == dict:
+                # maybe could have other keywords in the future
+                samps = [s for s in samples if s not in samps['EXCEPT']]
+            else:
+                if type(samps) == str:
+                    samps = [samps]
+            ctrlmap[ctrl] = samps
+    arguments['controls'] = controls
+
+    # in case strings are passed instead of lists
+    for comp in arguments['comparisons']:
+        for k, v in comp.items():
+            if type(v) == str:
+                comp[k] = [v]
+    for k, v in arguments['sample_reps'].items():
+        if type(v) == str:
+            arguments['sample_reps'][k] = [v]
+    return arguments
 
 if __name__ == '__main__':
     #arguments = yaml.safe_load(open(sys.argv[1]))
     if len(sys.argv) == 2 and sys.argv[1] not in ('-h', '--help', '-help'):
-        #arguments = yaml.safe_load(open('/Users/johnc.thomas/Dropbox/crispr/pycharm/jts_crispr_processing/crispr_tools_yaml/tests/test_pipeline.yaml'))
-        arguments = yaml.safe_load(open(sys.argv[1]))
-        #print(arguments)
-        #repmaps = arguments['repmap']
-        samples = arguments['sample_reps'].keys()
-        controls = arguments['controls']
-        for ctrl_grp, ctrlmap in controls.items():
-            for ctrl, samps in ctrlmap.items():
-                if samps == 'ALL':
-                    samps = copy(list(samples))
-                elif type(samps) == dict:
-                    # maybe could have other keywords in the future
-                    samps = [s for s in samples if s not in samps['EXCEPT']]
-                else:
-                    if type(samps) == str:
-                        samps = [samps]
-                ctrlmap[ctrl] = samps
-        arguments['controls'] = controls
-
-        # in case strings are passed instead of lists
-        for comp in arguments['comparisons']:
-            for k, v in comp.items():
-                if type(v) == str:
-                    comp[k] = [v]
-        for k, v in arguments['sample_reps'].items():
-            if type(v) == str:
-                arguments['sample_reps'][k] = [v]
-
-
-        run_analysis(**arguments)
+        args = process_yaml(sys.argv[1])
+        run_analysis(**args)
     else:
         print('Run mageck and jacks analyses using a YAML file.\nSee {} for an example.'.format(
             pathlib.Path(__file__).parent / 'tests'/'test_pipeline.yaml'

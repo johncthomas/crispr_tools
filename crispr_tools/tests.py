@@ -2,25 +2,18 @@ from crispr_pipeline import *
 from shutil import rmtree
 import os
 
-# def test_pipeline(**kwargs):
-#     p = pathlib.Path(os.path.dirname(os.path.realpath(__file__)))
-#     #print(p)
-#     testp = str(p.parent/'tests')
-#     outp = str(Path(p.parent/'tests'/'ran_test'))
-#     if os.path.isdir(outp):
-#         rmtree(outp)
-#     run_analysis(testp+'/test_counts.tsv', testp+'/test_pipeline.xlsx', outp, 'itsatest',
-#              **kwargs)
-
 def test_pipeline(**kwargs):
+    print(kwargs)
     p = pathlib.Path(os.path.dirname(os.path.realpath(__file__)))
-    #print(p)
-    testp = str(p.parent/'tests')
-    outp = str(Path(p.parent/'tests'/'ran_test'))
-    if os.path.isdir(outp):
-        rmtree(outp)
-    run_analysis(testp+'/test_counts.tsv', testp+'/test_pipeline.xlsx', outp, 'itsatest',
-             **kwargs)
+    print(p)
+    testp = p/'tests'
+    # outp = str(Path(p.parent/'tests'/'ran_test'))
+
+    args = process_yaml(testp/'test_pipeline.yaml')
+    for k, v in kwargs.items():
+        args[k] = v
+    #print(args)
+    run_analysis(**args)
 
 if __name__ == '__main__':
     test_pipeline(charts_only=False)
