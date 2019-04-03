@@ -1,4 +1,3 @@
-#!Python3
 import os, sys
 from collections import Counter
 import gzip

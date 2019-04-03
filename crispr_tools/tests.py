@@ -2,6 +2,8 @@ from crispr_pipeline import *
 from shutil import rmtree
 import os
 
+
+
 def test_pipeline(**kwargs):
     print(kwargs)
     p = pathlib.Path(os.path.dirname(os.path.realpath(__file__)))
@@ -9,7 +11,7 @@ def test_pipeline(**kwargs):
     testp = p/'tests'
     # outp = str(Path(p.parent/'tests'/'ran_test'))
 
-    args = process_yaml(testp/'test_pipeline.yaml')
+    args = process_arguments(testp / 'test_pipeline.yaml')
     for k, v in kwargs.items():
         args[k] = v
     #print(args)

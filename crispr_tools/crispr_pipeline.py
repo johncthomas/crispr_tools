@@ -35,39 +35,24 @@ from crispr_tools.jacks_tools import tabulate_score, scores_scatterplot, mahal_n
 from crispr_tools.version import __version__
 
 #todo add sample labels to sample_details for nice chart labels
-#todo format of log filename
-#todo put each chunk of analysis into its own function
+#todo? put each chunk of analysis into its own function
 
 """Go from FastQ files to completed JACKS/MAGeCK analysis. 
 fq->mapped_counts&violin plots are one command (count_reads.count_batch() ) 
 counts->charts&tables another."""
 
+class StreamToLogger(object):
+   """
+   Fake file-like stream object that redirects writes to a logger instance.
+   """
+   def __init__(self, logger, log_level=logging.INFO):
+      self.logger = logger
+      self.log_level = log_level
+      self.linebuf = ''
 
-def call_magecks(fn_counts, fn_repmap, outprefix):
-    mageck_str = "mageck test -k {counts} -t {treat} -c {ctrl} -n {outprefix}{ctrlnm}-{sampnm}"
-    xl = pd.ExcelFile(fn_repmap)
-    for ctrlgroup in xl.sheet_names:
-        repmap = xl.parse(ctrlgroup)
-
-        samp_map = {}
-        for samp, groupi in repmap.groupby('samp').groups.items():
-            samp_map[samp] = [repmap.iloc[i, 0] for i in groupi]
-
-        # comparison by sample names
-        comps = list(set([(row.ctrl, row.samp) for _, row in repmap.iterrows()]))
-
-        for ctrl, treat in comps:
-            ctrls = ','.join(samp_map[ctrl])
-            treats = ','.join(samp_map[treat])
-            s = mageck_str.format(
-                counts=fn_counts,
-                treat=treats,
-                ctrl=ctrls,
-                outprefix=outprefix+'.'+ctrlgroup+'.',
-                ctrlnm=ctrl,
-                sampnm=treat
-            )
-            call(s, shell=True, )
+   def write(self, buf):
+      for line in buf.rstrip().splitlines():
+         self.logger.log(self.log_level, line.rstrip())
 
 
 def call_JACKS(fn_counts, fn_repmap, outprefix, norm='mode'):
@@ -98,30 +83,34 @@ def run_analysis(fn_counts, outdir, file_prefix,
                  skip_mageck = False, skip_jacks = False, dont_log=False,
                  skip_extra_mageck = False, notes=''):
 
-    pipeLOG.info('Version = '+__version__)
-    pipeLOG.info('Working dir = '+os.getcwd())
-    pipeLOG.info('outdir = '+outdir)
-    call(['mkdir', outdir])
-    if not dont_log:
-        t = '{}-{}-{}_{}h{}m{}s.{}'.format(*datetime.datetime.now().timetuple()[:-1])
-        set_logger(str(Path(outdir, file_prefix + f'log_{t}.txt')))
 
-    frame = inspect.currentframe()
-    args, _, _, values = inspect.getargvalues(frame)
-    pipeLOG.info('\n\t'.join([f"{x} = {values[x]}" for x in args]))
-    pipeLOG.info(f"Full outdir = {os.path.realpath(outdir)}")
+    call(['mkdir', outdir])
+
 
     for analysis_str in ('jacks_mode', 'jacks_median', 'mageck'):
-        call(['mkdir', str(Path(outdir, analysis_str))])
+        call(['mkdir', '-p', str(Path(outdir, analysis_str))])
         call(['mkdir', str(Path(outdir, analysis_str, 'volcano'))])
         call(['mkdir', str(Path(outdir, analysis_str, 'scatter'))])
         call(['mkdir', str(Path(outdir, analysis_str, 'tables'))])
         call(['mkdir', str(Path(outdir, analysis_str, 'files'))])
         #call(['mkdir', str(Path(outdir, 'scattercharts'))])
 
+    if not dont_log:
+        t = '{}-{}-{}_{}h{}m{}s.{}'.format(*datetime.datetime.now().timetuple()[:-1])
+        set_logger(str(Path(outdir, file_prefix + f'log_{t}.txt')))
+
+        sys.stderr = StreamToLogger(pipeLOG, logging.ERROR)
+
+    pipeLOG.info('Version = '+__version__)
+    pipeLOG.info('Working dir = '+os.getcwd())
+    pipeLOG.info('outdir = '+outdir)
+
+    frame = inspect.currentframe()
+    args, _, _, values = inspect.getargvalues(frame)
+    pipeLOG.info('\n\t'.join([f"{x} = {values[x]}" for x in args]))
+    pipeLOG.info(f"Full outdir = {os.path.realpath(outdir)}")
+
     pipeLOG.info('Control groups being used: '+', '.join(controls.keys()))
-
-
 
     for ctrlgroup, ctrlmap in controls.items():
         # File name prefixes
@@ -149,6 +138,7 @@ def run_analysis(fn_counts, outdir, file_prefix,
             with open(repmap_fn, 'w') as f:
                 for line in reptab:
                     f.write('\t'.join(line) + '\n')
+
 
             pipeLOG.info(f"Running JACKS, mode and median normalised with {repmap_fn}")
             if jacks_eff_fn:
@@ -358,17 +348,6 @@ def run_analysis(fn_counts, outdir, file_prefix,
 
     pipeLOG.info("Done. "+str(datetime.datetime.now()))
 
-def __OLD_iter_comps(comp_series: pd.Series, tab: pd.DataFrame=None):
-    # swapping the control/sample order
-    for samp, comps in comp_series.iteritems():
-        if comps is not np.NaN:
-            comps = comps.replace(' ', '').split(',')
-            # comps generally controls
-            for comp in comps:
-                if tab is not None:
-                    if comp not in tab.columns or samp not in tab.columns:
-                        continue
-                yield samp, comp
 
 def iter_comps(comparisons: List[dict], tab: pd.DataFrame=None):
     for comparison in comparisons:
@@ -379,8 +358,8 @@ def iter_comps(comparisons: List[dict], tab: pd.DataFrame=None):
                         continue
                 yield ctrl_samp, comp
 
-def process_yaml(fn):
-    arguments = yaml.safe_load(open(fn))
+def process_arguments(arguments):
+
     samples = arguments['sample_reps'].keys()
     controls = arguments['controls']
     for ctrl_grp, ctrlmap in controls.items():
@@ -407,11 +386,59 @@ def process_yaml(fn):
     return arguments
 
 if __name__ == '__main__':
-    #arguments = yaml.safe_load(open(sys.argv[1]))
-    if len(sys.argv) == 2 and sys.argv[1] not in ('-h', '--help', '-help'):
-        args = process_yaml(sys.argv[1])
-        run_analysis(**args)
-    else:
-        print('Run mageck and jacks analyses using a YAML file.\nSee {} for an example.'.format(
-            pathlib.Path(__file__).parent / 'tests'/'test_pipeline.yaml'
-        ))
+
+    parser = argparse.ArgumentParser(
+        description="Run mageck and jacks analyses using a YAML file.\n "
+                    "Use arguments below to override yaml options"
+    )
+    parser.add_argument('fn_yaml', metavar="YAML",
+                        help="path to .yml file specifying arguments. At a minimum must contain `sample_reps`"
+                             " & `controls` keywords and values. "
+                             "Other options are overridden by command line arguments.")
+    parser.add_argument('--fn_counts', metavar='COUNTS', help='Path to counts file', default=None)
+    parser.add_argument('--outdir', metavar='OUTDIR', default=None,
+                        help='Path to where results files will be stored, a '
+                        "directory structure will be created.")
+    parser.add_argument('--file_prefix', metavar='PREFIX', default=None,
+                        help="String to form identifying prefix for all files generated.")
+    parser.add_argument('-v', '--volc-labels',dest='volc_labels', metavar='N', type=int, default=None,
+                        help="Number of depleted/enriched genes to label in volcano charts.")
+    parser.add_argument('-s', '--scatter-labels', metavar='N', type=int, default=None, dest='scatter_labels',
+                        help="Number of genes to label on either side of The Line in scatter charts.")
+    parser.add_argument('--charts-only', action='store_true', default=None,
+                        help="Don't run MAGeCK or JACKS, just produce plots with existing files.")
+    parser.add_argument('-j', '--jacks-efficacy', metavar='EFF_FILE', dest='jacks_eff_fn', default=None,
+                        help='Path to efficacy file to be used in JACKS analysis. '
+                             'If the provided string contains {}, the repmap ctrl group will be substituted'
+                             'into the filename. Optional.')
+    parser.add_argument('--skip-jacks', action='store_true', dest='skip_jacks', default=None,
+                        help="don't run JACKS analysis or try to plot from JACKS analyses")
+    parser.add_argument('--skip-mageck', action='store_true', dest='skip_mageck', default=None,
+                        help="don't run MAGeCK analysis or try to plot from MAGeCK analyses")
+    parser.add_argument('--dont-log', action='store_true', dest='dont_log', default=None,
+                        help="Don't write a log file.")
+
+    # get arguments from the command line and the YAML
+    clargs = parser.parse_args() # need to assign this before calling vars() for some reason
+    cmd_args = vars(clargs)
+    yml_args = yaml.safe_load(open(cmd_args['fn_yaml']))
+    del cmd_args['fn_yaml']
+
+    # over write yml_args with any specified in the command line
+    for k, v in cmd_args.items():
+        if v is not None:
+            yml_args[k] = v
+
+    args = process_arguments(yml_args)
+
+    #print(args)
+
+    run_analysis(**args)
+
+
+
+    # run_analysis(**vars(clargs))
+    # os.chdir('/Users/johnc.thomas/Dropbox/crispr/screens_analysis/matylda_HS715-20')
+    # run_analysis(**{'fn_counts': '/Users/johnc.thomas/Dropbox/crispr/counts_all/matylda_HS715-20.counts.tsv',
+    #  'fn_repmap': 'matylda_HS715-20.repmap.3.xlsx', 'outdir': 'take5', 'file_prefix': 'HS715-20', 'labeldep': 30,
+    #  'labelenr': 10, 'charts_only': False})
