@@ -2,6 +2,7 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy import stats
+import seaborn as sns
 try:
     from adjustText import adjust_text
 except ModuleNotFoundError:
@@ -11,7 +12,7 @@ except ModuleNotFoundError:
 from pathlib import Path, PosixPath, WindowsPath
 import pandas as pd
 
-__version__ = 'v1.3.0'
+__version__ = 'v1.4.0'
 
 # import logging
 # slowvolcLOG = logging.getLogger('slow_volc')
@@ -23,6 +24,7 @@ __version__ = 'v1.3.0'
 
 
 #todo; pass plot_volcano a filen string and it loads the table
+#todo test pca grid
 
 def drop_nonumeric(tab):
     nonumeric = tab.columns[tab.iloc[0, :].apply(type) == str]
@@ -283,3 +285,35 @@ def tabulate_mageck(prefix):
         table[exp] = tab
     return table
 
+
+def pca_grid(pca, hue_deet, style_deet, max_components=5, also_return_fig=False):
+    """"""
+    thing = sns.scatterplot(pca.components_[0], pca.components_[0],
+                            hue=hue_deet, style=style_deet,
+                            s=150)
+
+    leg = thing.get_legend_handles_labels()
+    plt.close()
+
+    max_b = max_components - 1
+    fig, axes = plt.subplots(max_components, max_b, figsize=(4.5 * max_b, 3.85 * max_components))
+    # pc ind also used for subplots
+    for pc_a in range(max_components):
+        for pc_b in range(max_b):
+            plt.sca(axes[pc_a][pc_b])
+
+            if pc_a == pc_b:
+                plt.legend(*leg)
+                continue
+
+            # pc_a/b swapped to get column PC on the x and row PC on the y
+            sns.scatterplot(pca.components_[pc_b], pca.components_[pc_a],
+                            hue=hue_deet, style=style_deet,
+                            s=150, legend=False)
+            plt.xlabel(f"PC {pc_b+1} (variance explained: {pca.explained_variance_ratio_[pc_b]*100:.3}%)")
+            plt.ylabel(f"PC {pc_a+1} (variance explained: {pca.explained_variance_ratio_[pc_a]*100:.3}%)")
+    plt.tight_layout()
+    if also_return_fig:
+        return (fig, axes)
+    else:
+        return axes

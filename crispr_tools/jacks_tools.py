@@ -23,83 +23,10 @@ __version__ = '0.7'
 # in 0.5
 # refactor "esstab" to "score_table"
 
-def plot_volcano_from_scoretable(score_table, savefn=None, ax=None,
-                 label_deplet = 0, label_enrich = 0, other_labels=None,
-                 p_thresh = 0.05):
-    """Supply pandas table with 'jacks_score' and 'fdr_pos/neg' columns.
-    Returns fig, ax if no ax is supplied."""
-    if ax is None:
-        fig, ax_ = plt.subplots(1, 1, figsize=(10, 10))
-    else:
-        plt.sca(ax)
-
-    score_table = score_table.copy()
-
-    pos = score_table['jacks_score'] > 0
-    neg = ~pos
-
-    # get lowest not zero and set zeroes to 1/10 that value
-    min_pos = min(score_table.loc[score_table['fdr_pos'] > 0, 'fdr_pos'])
-    min_neg = min(score_table.loc[score_table['fdr_neg'] > 0, 'fdr_neg'])
-    #print(min_neg, min_pos)
-    for fdri, fdr in enumerate(['fdr_pos', 'fdr_neg']):
-        score_table.loc[score_table[fdr] == 0, fdr] = (min_pos, min_neg)[fdri] / 10
-
-    for mask, fdr in (pos, 'fdr_pos'), (neg, 'fdr_neg'):
-        score_table.loc[mask, 'fdr'] = score_table.loc[mask, fdr]
-
-    score_table.loc[:, 'fdr'] = score_table['fdr'].apply(lambda x: -np.log10(x))
-
-    faces = dict(facecolors='none', edgecolors='b')
-    # plt.scatter(score_table.loc[pos, 'jacks_score'], score_table.loc[pos, 'fdr_pos'], **faces)
-    # plt.scatter(score_table.loc[neg, 'jacks_score'], score_table.loc[neg, 'fdr_neg'], **faces)
-    plt.scatter(score_table.jacks_score, score_table.fdr, **faces)
-
-    p = -np.log10(p_thresh)
-
-    plt.plot([min(score_table['jacks_score']), max(score_table['jacks_score'])],
-             [p, p], 'k--')
-
-    # label the top and bottom most, if specified
-    texts = []
-    texts_done = []
-    # get subtables
-    dep = score_table.sort_values('jacks_score').head(label_deplet)
-    enr = score_table.sort_values('jacks_score').tail(label_enrich)
-    for stab in dep, enr:
-        for lab, row in stab.iterrows():
-            if row.fdr < p:
-                continue
-            texts_done.append(lab)
-            texts.append(plt.text(row.jacks_score, row.fdr, lab))
-    # label additional genes
-    if other_labels:
-        for lab, row in score_table.loc[other_labels, :].iterrows():
-            if lab in texts_done:
-                continue
-            texts.append(
-                plt.text(score_table.loc[lab, 'jacks_score'],
-                         score_table.loc[lab, 'fdr'],
-                         lab)
-            )
-    if texts:
-        adjust_text(texts, arrowprops=dict(arrowstyle='->', color='red'))
-
-    plt.xlabel('JACKS score')
-    plt.ylabel('-log10(FDR)')
-
-    if savefn :
-        plt.savefig(savefn)
-    if ax is None:
-        return fig, ax_
-    else:
-        return ax
-
-
 
 def scores_scatterplot(x, y, table=None, distance_gradient=True, label_pos=0, label_neg=0,
                        distance:pd.Series=None, min_label_dist=0.5, min_label_diff=0.5,
-                        labels=None, formatters=None, dist_name = None, ax=None) -> plt.Axes:
+                        labels=None, formatters=None, dist_name = None, gradient=1, ax=None) -> plt.Axes:
     """Produce biplot of 2 essentiality series.
     args:
         x, y:
@@ -165,7 +92,7 @@ def scores_scatterplot(x, y, table=None, distance_gradient=True, label_pos=0, la
     if distance_gradient:
         if distance is None:
             _, _, distance = mahal_nocov(
-                x_score, table[x].stdev, y_score, table[y].stdev
+                x_score, table[x].stdev, y_score, table[y].stdev, line_ig=(0, gradient)
             )
         # no nans
         distance = distance.loc[~distance.isna()]
@@ -279,10 +206,10 @@ def tabulate_score(prefix):
     and then 'jacks_score, fdr_log10, fdr_neg, fdr_pos, stdev' at level 1"""
     # othertab = pd.DataFrame(columns=("IC10","IC90","D14"), index=essen['D14'].index)
     # Tables produced by jacks have columns that are the groups
-    genes = pd.read_table(prefix + '_gene_JACKS_results.txt', sep='\t', index_col=0)
+    genes = pd.read_csv(prefix + '_gene_JACKS_results.txt', sep='\t', index_col=0)
     genes_index = sorted(genes.index)
     genes = genes.reindex(genes_index)
-    genesstd = pd.read_table(prefix + '_gene_std_JACKS_results.txt', sep='\t', index_col=0)
+    genesstd = pd.read_csv(prefix + '_gene_std_JACKS_results.txt', sep='\t', index_col=0)
     genesstd = genesstd.reindex(genes_index)
     ps = genes / genesstd
     ps = ps.apply(norm.cdf)
@@ -338,9 +265,9 @@ def tabulate_jacks(prefix):
     guide_cols = pd.MultiIndex.from_product((samples, ['foldchange', 'fold_std', 'eff', 'eff_std']),
                                             names=['exp', 'stat'])
     fchange_df = pd.DataFrame(columns=guide_cols)
-    foldchange = pd.read_table(prefix + '_logfoldchange_means.txt', **kwtab)
-    foldstd = pd.read_table(prefix + '_logfoldchange_std.txt', **kwtab)
-    eff_tab = pd.read_table(prefix + '_grna_JACKS_results.txt', **kwtab)
+    foldchange = pd.read_csv(prefix + '_logfoldchange_means.txt', **kwtab)
+    foldstd = pd.read_csv(prefix + '_logfoldchange_std.txt', **kwtab)
+    eff_tab = pd.read_csv(prefix + '_grna_JACKS_results.txt', **kwtab)
 
     for exp in samples:
         fchange_df.loc[:, (exp, 'lfc')] = foldchange[exp]
@@ -372,7 +299,7 @@ def dist_to_line(ols, p):
 
 
 class FakeOLS:
-    def __init__(self, slope, intcpt):
+    def __init__(self, intcpt, slope):
         self.slope = slope
         self.intcpt = intcpt
 
@@ -405,14 +332,14 @@ def closest_point(ols, xs, ys, verbose=False):
 
 
 
-def mahal_nocov(xs, xs_sd, ys, ys_sd, line_gi = (1,0), **cp_kwargs):
+def mahal_nocov(xs, xs_sd, ys, ys_sd, line_ig = (0,1), **cp_kwargs):
     """Pass x, y values and stdev. Returns (euclidian distance, p-values of
     mahal distance, and mahal_distance from the x=y line.
 
     Other lines can be specified using line_gi giving gradient and intercept
     (y=ax+b)"""
 
-    ols = FakeOLS(*line_gi)
+    ols = FakeOLS(*line_ig)
     # get closest points, calc significance
     cxs, cys = closest_point(ols, xs, ys, **cp_kwargs)
     mahal_dist = np.sqrt((cxs - xs) ** 2 / xs_sd + (cys - ys) ** 2 / ys_sd)

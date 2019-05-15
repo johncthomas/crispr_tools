@@ -21,7 +21,7 @@ setup(
     author_email = 'jcthomas000@gmail.com',
     packages=find_packages(exclude=['contrib', 'docs', 'tests']),
     install_requires = [
-        'numpy', 'scipy', 'matplotlib', 'pandas', 'shapely', 'pyyaml', 'statsmodels'
+        'numpy', 'scipy', 'matplotlib', 'pandas', 'shapely', 'pyyaml', 'statsmodels', 'seaborn',
     ],
     python_requires = '>=3.6',
     scripts=['crispr_tools/crispr_pipeline.py', 'crispr_tools/count_reads.py'],

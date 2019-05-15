@@ -297,7 +297,10 @@ def run_analysis(fn_counts, outdir, file_prefix,
         pipeLOG.info('Doing comparisons of mageck')
         mag_tables = {}
         # Get the tables, including the intersample combinations
-        for ctrlgroup in list(controls.keys())+['EXTRA']:
+        ctrlgroups = list(controls.keys())
+        if not skip_extra_mageck:
+            ctrlgroups += ['EXTRA']
+        for ctrlgroup in ctrlgroups:
             fnprefix = file_prefix + '.' + ctrlgroup + '.'
             mf_prefix = str(Path(outdir, 'mageck', 'files', fnprefix))
             scores_mageck = tabulate_mageck(mf_prefix)
@@ -363,20 +366,22 @@ def process_arguments(arguments):
     samples = arguments['sample_reps'].keys()
     controls = arguments['controls']
     for ctrl_grp, ctrlmap in controls.items():
+        #todo: if ctrlmap is a list assume a single control group and don't crash
+        #print('ctrlmap',  ctrlmap)
         for ctrl, samps in ctrlmap.items():
-            if samps == 'ALL':
+            if type(samps) == str:
+                samps = [samps]
+            if samps == ['ALL']:
                 samps = copy(list(samples))
             elif type(samps) == dict:
                 # maybe could have other keywords in the future
                 samps = [s for s in samples if s not in samps['EXCEPT']]
-            else:
-                if type(samps) == str:
-                    samps = [samps]
             ctrlmap[ctrl] = samps
     arguments['controls'] = controls
 
     # in case strings are passed instead of lists
     for comp in arguments['comparisons']:
+        print(arguments['comparisons'])
         for k, v in comp.items():
             if type(v) == str:
                 comp[k] = [v]

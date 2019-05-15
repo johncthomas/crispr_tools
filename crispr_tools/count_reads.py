@@ -15,7 +15,9 @@ It's probably not very useful if either of these things are false.
 Produces dereplicated sequence counts (one file per sample) and then a single
 file containing reads mapped to guide/gene from a library file."""
 
-__version__ = '1.3.3'
+__version__ = '1.3.4'
+
+# 1.3.4 bug in mapping function
 # 1.3.3 fixed mapping so it properly truncates the filename to sample name
 # 1.3.2 Bugfixes, documentation
 # 1.3.1 returned column order of map_counts now 'guide', 'gene', [everything else]
@@ -68,7 +70,7 @@ def count_reads(fn, slicer=(None, None), s_len=None, s_offset=0, ):
                     continue
             seqs[s] += 1
     f.close()
-    print(fn, len(seqs), 'sequences counted.')
+    print(fn, len(seqs), 'unique sequences, ', sum(seqs.values()), 'reads')
     if s_len is not None:
         print(failed_count, 'sequences did not contain subsequence')
     return seqs
@@ -251,7 +253,8 @@ def map_counts(fn_or_dir, lib, guidehdr='guide', genehdr='gene',
         if remove_prefix:
             sn = sn.split('.')[1]
         print('sample header:', sn)
-        rawcnt.loc[:, sn] = pd.read_table(fn, index_col=0, header=None).iloc[:, 0]
+        samp = pd.read_table(fn, index_col=0, header=None, names=['seq', sn])
+        rawcnt = pd.concat([rawcnt, samp], 1)
 
     rawcnt = rawcnt.fillna(0).astype(int)
     # the absent guides
@@ -300,6 +303,10 @@ def map_counts(fn_or_dir, lib, guidehdr='guide', genehdr='gene',
 #
 # )
 
+
+
+
+
 if __name__ == '__main__':
     print('v', __version__)
     parser = argparse.ArgumentParser(description='Count unique sequences in FASTQs. Assumes filenames are {sample_name}_L00?_R1_001.fastq[.gz]')
@@ -329,10 +336,7 @@ if __name__ == '__main__':
 
     written_fn = count_batch(clargs.files, slicer, clargs.p, None, 0, clargs.f, clargs.fn_split, clargs.merge_samples,
                 clargs.just_go, clargs.quiet)
-    if clargs.library:
 
+    if clargs.library:
         map_counts(written_fn, clargs.library, drop_unmatched=True, report=True, remove_prefix=True,
                    out_fn=clargs.p+'.counts.tsv', splitter=clargs.f)
-
-
-
