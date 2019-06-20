@@ -1,4 +1,5 @@
-#!python3
+#!/usr/bin/env python3
+
 import logging, os, pathlib, datetime, inspect, argparse, sys
 
 from typing import List, Dict
@@ -41,9 +42,13 @@ from crispr_tools.version import __version__
 fq->mapped_counts&violin plots are one command (count_reads.count_batch() ) 
 counts->charts&tables another."""
 
+
+
+
+
 class StreamToLogger(object):
    """
-   Fake file-like stream object that redirects writes to a logger instance.
+   File-like stream object that redirects writes to a logger instance.
    """
    def __init__(self, logger, log_level=logging.INFO):
       self.logger = logger
@@ -80,7 +85,8 @@ def run_analysis(fn_counts, outdir, file_prefix,
                  comparisons: List[dict],
                  volc_labels=15, scatter_labels=10,
                  charts_only = False, jacks_eff_fn=None,
-                 skip_mageck = False, skip_jacks = False, dont_log=False,
+                 skip_mageck = False, skip_jacks = False, skip_charts=False,
+                 dont_log=False, exp_name='', analysis_name='',
                  skip_extra_mageck = False, notes=''):
 
 
@@ -100,7 +106,8 @@ def run_analysis(fn_counts, outdir, file_prefix,
         set_logger(str(Path(outdir, file_prefix + f'log_{t}.txt')))
 
         sys.stderr = StreamToLogger(pipeLOG, logging.ERROR)
-
+    pipeLOG.info('exp_name = ' + exp_name)
+    pipeLOG.info('analysis_name = ' + analysis_name)
     pipeLOG.info('Version = '+__version__)
     pipeLOG.info('Working dir = '+os.getcwd())
     pipeLOG.info('outdir = '+outdir)
@@ -179,6 +186,8 @@ def run_analysis(fn_counts, outdir, file_prefix,
             pipeLOG.info('Running MAGeCK version '+check_output(["mageck","-v"]).decode())
 
             for ctrl_samp, treat_samps in ctrlmap.items():
+                if type(treat_samps) is str:
+                    treat_samps = [treat_samps]
                 for treat in treat_samps:
                     if treat == ctrl_samp:
                         continue
@@ -219,23 +228,24 @@ def run_analysis(fn_counts, outdir, file_prefix,
         #################
         #* volcano charts of all
         # use the universal one, have label options as part of args, maybe as a dict.
-        for analysis_str, xkey, analysis_tab in analyses_used:
-            pipeLOG.info('Volcano plot, '+analysis_str)
-            #analysis = analysis
-            for exp in analysis_tab.columns.levels[0]:
-                if analysis_str.startswith('jacks'):
-                    chart_title = '{} from {} ({} normalisation)'.format(exp, ctrlgroup, analysis_str)
-                else:
-                    # split by fnpref just in case it has a dash in it...
-                    #print(exp)
-                    ctrlnm, treatnm = exp.split('-')
-                    chart_title = '{} from {} ({} analysis)'.format(treatnm, ctrlnm, analysis_str)
-                plot_volcano(
-                    xkey, 'fdr_log10', analysis_tab[exp], chart_title,
-                    volc_labels,volc_labels,p_thresh=0.1,
-                    outfn=str(Path(outdir, analysis_str, 'volcano', fnprefix+exp+'.'+analysis_str+'_volcano.png'))
-                )
-                plt.close()
+        if not skip_charts:
+            for analysis_str, xkey, analysis_tab in analyses_used:
+                pipeLOG.info('Volcano plot, '+analysis_str)
+                #analysis = analysis
+                for exp in analysis_tab.columns.levels[0]:
+                    if analysis_str.startswith('jacks'):
+                        chart_title = '{} from {} ({} normalisation)'.format(exp, ctrlgroup, analysis_str)
+                    else:
+                        # split by fnpref just in case it has a dash in it...
+                        #print(exp)
+                        ctrlnm, treatnm = exp.split('-')
+                        chart_title = '{} from {} ({} analysis)'.format(treatnm, ctrlnm, analysis_str)
+                    plot_volcano(
+                        xkey, 'fdr_log10', analysis_tab[exp], chart_title,
+                        volc_labels,volc_labels,p_thresh=0.1,
+                        outfn=str(Path(outdir, analysis_str, 'volcano', fnprefix+exp+'.'+analysis_str+'_volcano.png'))
+                    )
+                    plt.close()
 
             # call(['tar', '-zcf',
             #       str(Path(outdir, analysis_str+'volcano_charts.tar.gz')), #file to be created
@@ -259,17 +269,17 @@ def run_analysis(fn_counts, outdir, file_prefix,
                 pipeLOG.info(f"\t{comp_from} vs {comp_to}")
                 #scatter
 
-
-                scores_scatterplot(comp_from, comp_to, analysis_tab,
-                                   label_pos=scatter_labels, label_neg=scatter_labels,
-                                   dist_name='Mahalanobis distance')
-                plt.title(f"{comp_from} vs {comp_to} ({ctrlgroup}, JACKS)")
-                fn = str(
-                    Path(outdir, analysis_str, 'scatter', fnprefix+"{}_vs_{}.scatter.png".format(comp_from, comp_to))
-                )
-                pipeLOG.info('Writing: '+fn)
-                plt.savefig(fn, dpi=150)
-                plt.close()
+                if not skip_charts:
+                    scores_scatterplot(comp_from, comp_to, analysis_tab,
+                                       label_pos=scatter_labels, label_neg=scatter_labels,
+                                       dist_name='Mahalanobis distance')
+                    plt.title(f"{comp_from} vs {comp_to} ({ctrlgroup}, JACKS)")
+                    fn = str(
+                        Path(outdir, analysis_str, 'scatter', fnprefix+"{}_vs_{}.scatter.png".format(comp_from, comp_to))
+                    )
+                    pipeLOG.info('Writing: '+fn)
+                    plt.savefig(fn, dpi=150)
+                    plt.close()
 
                 # pop mahal table
                 A, B = analysis_tab[comp_from], analysis_tab[comp_to]
@@ -330,21 +340,22 @@ def run_analysis(fn_counts, outdir, file_prefix,
                     continue
             # print(lfc_tabs)
             # print('**', fdr_tabs)
-            for fdrtab, fdrexp in fdr_tabs:
-                for ctrlgroup, ctrl_header,  treat_header in lfc_tabs:
-                    pipeLOG.info(f'MAgeck results comp using {ctrl_header} {treat_header}, {fdrexp}')
+            if not skip_charts:
+                for fdrtab, fdrexp in fdr_tabs:
+                    for ctrlgroup, ctrl_header,  treat_header in lfc_tabs:
+                        pipeLOG.info(f'MAgeck results comp using {ctrl_header} {treat_header}, {fdrexp}')
 
-                    scores_scatterplot(ctrl_header, treat_header, mag_tables[ctrlgroup], True, scatter_labels, scatter_labels,
-                                       distance=mag_tables[fdrtab].loc[:, (fdrexp, 'fdr_log10')],
-                                       min_label_dist=0.3,
-                                       dist_name='log10(FDR)')
-                    plt.title(f"{ctrl_header} vs {treat_header} (MAGeCK)")
-                    fn = str(
-                        Path(outdir, 'mageck', 'scatter', file_prefix+ '.' + ctrlgroup + ".{}_vs_{}.scatter.png".format(comp_from, comp_to))
-                    )
-                    pipeLOG.info('Writing: '+fn)
-                    plt.savefig(fn, dpi=150)
-                    plt.close()
+                        scores_scatterplot(ctrl_header, treat_header, mag_tables[ctrlgroup], True, scatter_labels, scatter_labels,
+                                           distance=mag_tables[fdrtab].loc[:, (fdrexp, 'fdr_log10')],
+                                           min_label_dist=0.3,
+                                           dist_name='log10(FDR)')
+                        plt.title(f"{ctrl_header} vs {treat_header} (MAGeCK)")
+                        fn = str(
+                            Path(outdir, 'mageck', 'scatter', file_prefix+ '.' + ctrlgroup + ".{}_vs_{}.scatter.png".format(comp_from, comp_to))
+                        )
+                        pipeLOG.info('Writing: '+fn)
+                        plt.savefig(fn, dpi=150)
+                        plt.close()
 
     import shutil
     shutil.copy(fn_counts, Path(outdir, Path(fn_counts).name))
@@ -361,7 +372,7 @@ def iter_comps(comparisons: List[dict], tab: pd.DataFrame=None):
                         continue
                 yield ctrl_samp, comp
 
-def process_arguments(arguments):
+def process_arguments(arguments:dict):
 
     samples = arguments['sample_reps'].keys()
     controls = arguments['controls']
@@ -371,6 +382,7 @@ def process_arguments(arguments):
         for ctrl, samps in ctrlmap.items():
             if type(samps) == str:
                 samps = [samps]
+            # if you add keywords you'll need to add them to the database add_data module
             if samps == ['ALL']:
                 samps = copy(list(samples))
             elif type(samps) == dict:
@@ -418,8 +430,13 @@ if __name__ == '__main__':
                              'into the filename. Optional.')
     parser.add_argument('--skip-jacks', action='store_true', dest='skip_jacks', default=None,
                         help="don't run JACKS analysis or try to plot from JACKS analyses")
+
     parser.add_argument('--skip-mageck', action='store_true', dest='skip_mageck', default=None,
                         help="don't run MAGeCK analysis or try to plot from MAGeCK analyses")
+
+    parser.add_argument('--skip-charts', action='store_true', dest='skip_charts', default=None,
+                        help="don't produce any charts")
+
     parser.add_argument('--dont-log', action='store_true', dest='dont_log', default=None,
                         help="Don't write a log file.")
 
@@ -429,13 +446,15 @@ if __name__ == '__main__':
     yml_args = yaml.safe_load(open(cmd_args['fn_yaml']))
     del cmd_args['fn_yaml']
 
+
+
     # over write yml_args with any specified in the command line
     for k, v in cmd_args.items():
         if v is not None:
             yml_args[k] = v
-
+    print(yml_args)
     args = process_arguments(yml_args)
-
+    del args['labels']
     #print(args)
 
     run_analysis(**args)

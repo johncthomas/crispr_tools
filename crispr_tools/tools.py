@@ -100,7 +100,7 @@ def plot_read_violins(tab, column_labs=None, log=True, size_norm=False, ax=None)
     if column_labs is None:
         column_labs = tab.columns
 
-    ax.violinplot(tab.T)
+    ax.violinplot(tab.T, )
     ax.boxplot(tab.T, widths=0.2)
     ax.set_xticks(range(1, len(column_labs) + 1))
     ax.set_xticklabels(column_labs, rotation=40)
@@ -157,7 +157,7 @@ def plot_volcano_from_mageck(tab, title='', label_genes=None, outfn='', ax=None,
 
 def plot_volcano(lfc, fdr, tab=None, title='', label_deplet=0, label_enrich=0,
                  other_labels=None, p_thresh=0.05, outfn='', ax=None,
-                 exclude_labs = ('NonT', 'Rando')):
+                 exclude_labs = ('NonT', 'Rando'), plot_kw:dict=None):
     """Draw a volcano plot of lfc vs fdr. assumes fdr is -log10.
 
     :param lfc: str giving tab[lfc] or series with gene names as index
@@ -183,8 +183,12 @@ def plot_volcano(lfc, fdr, tab=None, title='', label_deplet=0, label_enrich=0,
         fdr = tab[fdr]
 
     sctkw = dict(marker='o', linestyle='none')
+    if plot_kw is not None:
+        sctkw.update(plot_kw)
+
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(8, 12))
+    #todo update to use scatter and set minimum matplotlib version
     ax.plot(lfc, fdr, alpha=0.4, **sctkw)
     # plt.yscale('log')
     # plt.gca().invert_yaxis()

@@ -1,10 +1,14 @@
+### /usr/bin/env python3
 import os, sys
 from collections import Counter
 import gzip
 import argparse
 from pathlib import Path, PosixPath, WindowsPath
-
+from Levenshtein import distance as levendist
 from typing import List
+import multiprocessing
+from functools import partial
+
 
 """Functions for counting and mapping reads from multiple FASTQ files
 to some kind of sequence library, e.g. a CRISPR guide library. 
@@ -15,8 +19,10 @@ It's probably not very useful if either of these things are false.
 Produces dereplicated sequence counts (one file per sample) and then a single
 file containing reads mapped to guide/gene from a library file."""
 
-__version__ = '1.3.4'
+__version__ = '1.4.1'
 
+# 1.4.1 efficiency when merging the files in map_reads
+# 1.4.0 added fuzzy matching
 # 1.3.4 bug in mapping function
 # 1.3.3 fixed mapping so it properly truncates the filename to sample name
 # 1.3.2 Bugfixes, documentation
@@ -33,7 +39,6 @@ __version__ = '1.3.4'
 # v1.1 added argument parsing, options to merge lanes
 
 #todo just ouput a single file
-#todo use **kwargs to pass parsed args to count_batch
 #todo use logging instead of stealing print
 
 
@@ -46,19 +51,23 @@ def count_reads(fn, slicer=(None, None), s_len=None, s_offset=0, ):
     """
     if type(slicer[0]) == int:
         chop = slice(*slicer)
-    seqs = Counter()
-    lns = 0
+    seqs_count = Counter()
+    total_seqs = 0
     failed_count = 0
     if fn.endswith('.gz'):
         f = gzip.open(fn, 'rt')
     else:
         f = open(fn)
+
+    # parse out the sequences from the FastQ
     for line in f:
-        lns += 1
+        total_seqs += 1
         if line[0] == '@':
             s = f.__next__()
             s = s.replace('\n', '')
-            lns+=1
+            total_seqs+=1
+
+            # get the relevant part of the sequence
             if s_len is None:
                 s = s[chop]
             else:
@@ -68,12 +77,28 @@ def count_reads(fn, slicer=(None, None), s_len=None, s_offset=0, ):
                 except:
                     failed_count+=1
                     continue
-            seqs[s] += 1
+
+            seqs_count[s] += 1
     f.close()
-    print(fn, len(seqs), 'unique sequences, ', sum(seqs.values()), 'reads')
+    print(fn, len(seqs_count), 'unique sequences, ', sum(seqs_count.values()), 'reads')
     if s_len is not None:
         print(failed_count, 'sequences did not contain subsequence')
-    return seqs
+    return seqs_count
+
+
+def fuzzy_match(query_seq, lib_seqs, max_dist=3):
+    """Check that exactly one library sequence is sufficiently close
+    to the given sequence.
+    If so, return the library sequence that is close,
+    otherwise return None."""
+
+    close_mask = lib_seqs.apply(lambda x: levendist(x, query_seq)) <= max_dist
+    if sum(close_mask) == 1:
+        return lib_seqs.loc[close_mask].values[0]
+    else:
+        # explicitly...
+        return None
+
 
 def get_file_list(files_dir) -> List[os.PathLike]:
     """Pass single string or list of stings, strings that are files go on the
@@ -157,6 +182,7 @@ def count_batch(fn_or_dir, slicer, fn_prefix='', seq_len=None, seq_offset=0, fn_
     # filter the file list
     # strings are easier to work with at this point
     file_list = [str(f) for f in file_list]
+    #print(file_list)
     file_list = [ f for f in file_list if any([f.endswith(suf) for suf in allowed_extensions])]
 
     # map filenames to samples
@@ -219,12 +245,17 @@ def count_batch(fn_or_dir, slicer, fn_prefix='', seq_len=None, seq_offset=0, fn_
 
 def map_counts(fn_or_dir, lib, guidehdr='guide', genehdr='gene',
                drop_unmatched=False, report=False, splitter='.raw',
-               remove_prefix=True, out_fn=None):
+               remove_prefix=True, out_fn=None, fuzzy=False, fuzzy_threads=None,
+               ignore_singletons=False):
     """lib needs to be indexed by guide sequence. If it's not a DF a DF will
     be loaded and indexed by 'seq' or the first column. Returns a DF indexed
     by 'guide' with 'gene' as the second column.
 
+
     """
+
+    if fuzzy and fuzzy_threads is None:
+        fuzzy_threads = multiprocessing.cpu_count() - 1
 
     import pandas as pd
     if type(lib) in (str, PosixPath, WindowsPath):
@@ -238,27 +269,61 @@ def map_counts(fn_or_dir, lib, guidehdr='guide', genehdr='gene',
             lib.set_index('seq', drop=False, inplace=True)
         else:
             lib.set_index(lib.columns[0])
-    # else the library should be in a sueable form.
+    # else the library should be in a useable form.
 
     # write a single table
     file_list = get_file_list(fn_or_dir)
     file_list = [f for f in file_list if splitter in str(f)]
-    print(file_list)
-    rawcnt = pd.DataFrame()
 
-    # get single table of counts
+    rawcnt = {} #  will be cast to DF
     for fn in file_list:
         # filtering of fn done before here
         sn = fn.name.split(splitter)[0]
         if remove_prefix:
             sn = sn.split('.')[1]
         print('sample header:', sn)
-        samp = pd.read_table(fn, index_col=0, header=None, names=['seq', sn])
-        rawcnt = pd.concat([rawcnt, samp], 1)
+        rawcnt[sn] = pd.read_csv(fn, index_col=0, header=None, sep='\t')[1]
+        # rawcnt = pd.concat([rawcnt, samp], 1)
+    rawcnt = pd.DataFrame(rawcnt).fillna(0).astype(int)
 
-    rawcnt = rawcnt.fillna(0).astype(int)
+    # we should have a table indexed by the sequences
+    if fuzzy:
+        if type(fuzzy) == int:
+            maxdist = fuzzy
+        else:
+            maxdist = 3
+        if ignore_singletons:
+            rawcnt = rawcnt.loc[rawcnt.sum(1) > 1]
+
+        seqs = pd.Series(rawcnt.index, index=rawcnt.index)
+        chunk_sz = seqs.shape[0] // fuzzy_threads
+
+        # asynchronously match
+        fz_results = []
+        with multiprocessing.Pool(fuzzy_threads) as pool:
+            for chunkn in range(fuzzy_threads):
+                subseqs = seqs.iloc[chunkn * chunk_sz:(1 + chunkn) * chunk_sz]
+                fz_results.append(
+                    pool.apply_async(
+                        subseqs.apply,
+                        args=(fuzzy_match,),
+                        kwds=dict(
+                            lib_seqs=pd.Series(lib.index),
+                            max_dist=maxdist
+                        )
+                    )
+                )
+
+            for r in fz_results:
+                matched = r.get().dropna()
+                rawcnt.loc[matched.index, 'fuzzy'] = matched
+
+            rawcnt = rawcnt.groupby('fuzzy').sum()
+            rawcnt.index.name = 'seq'
+
     # the absent guides
     missing = lib.loc[~lib.index.isin(rawcnt.index), :].index
+
 
     # get the present guides
     matches = rawcnt.loc[rawcnt.index.isin(lib.index), :].index
@@ -309,6 +374,11 @@ def map_counts(fn_or_dir, lib, guidehdr='guide', genehdr='gene',
 
 if __name__ == '__main__':
     print('v', __version__)
+    cpus = multiprocessing.cpu_count()
+    if cpus > 10:
+        cpus = 10
+
+    #print('v', __version__)
     parser = argparse.ArgumentParser(description='Count unique sequences in FASTQs. Assumes filenames are {sample_name}_L00?_R1_001.fastq[.gz]')
     parser.add_argument('files', nargs='+',
                         help="A list of files or dir. All files in given dir that end with .fastq or .fastq.gz or .fq will be counted.")
@@ -329,14 +399,24 @@ if __name__ == '__main__':
     parser.add_argument('--library', default=None, metavar='LIB_PATH',
                         help="Pass a library file and a single mapped reads count file will be output with" \
                              "the name [FN_PREFIX].counts.tsv")
+    parser.add_argument('--fuzzy-matching', type=int, default=False, metavar='N',
+                        help='Count sequences with up to N differences from the library (excludes ambiguous reads' \
+                        'that fuzzily match multiple lib seqs)')
+    parser.add_argument('--cpus', type=int, default=cpus, help="Number of processes when doing fuzzy matching. "\
+                        "Default set to what's available or 10, whichever's lower.")
     clargs = parser.parse_args()
+
+    if clargs.library:
+        assert os.path.isfile(clargs.library)
 
     # slices list of input files, or dir
     slicer = [int(n) for n in clargs.s.split(',')]
 
     written_fn = count_batch(clargs.files, slicer, clargs.p, None, 0, clargs.f, clargs.fn_split, clargs.merge_samples,
-                clargs.just_go, clargs.quiet)
+                clargs.just_go, clargs.quiet,)
 
     if clargs.library:
         map_counts(written_fn, clargs.library, drop_unmatched=True, report=True, remove_prefix=True,
-                   out_fn=clargs.p+'.counts.tsv', splitter=clargs.f)
+                out_fn=clargs.p+'.counts.tsv', splitter=clargs.f,
+                   fuzzy=clargs.fuzzy_matching, fuzzy_threads=clargs.cpus)
+

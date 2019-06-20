@@ -10,8 +10,8 @@ def test_pipeline(**kwargs):
     print(p)
     testp = p/'tests'
     # outp = str(Path(p.parent/'tests'/'ran_test'))
-
-    args = process_arguments(testp / 'test_pipeline.yaml')
+    unprocessed_args = yaml.safe_load(open(testp/'test_pipeline.yaml'))
+    args = process_arguments(unprocessed_args)
     for k, v in kwargs.items():
         args[k] = v
     #print(args)

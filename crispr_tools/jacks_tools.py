@@ -12,7 +12,7 @@ except ModuleNotFoundError:
     def adjust_text(*args, **kwargs):
         pass
 from copy import copy
-__version__ = '0.7'
+__version__ = '0.7.1'
 
 #todo: sepfucntions for each table, one function that calls all, option to only return scores
 #todo subclass scores_table from DF, add functions as methods, plots, mahal, scores etc
@@ -199,7 +199,7 @@ def scores_scatterplot(x, y, table=None, distance_gradient=True, label_pos=0, la
         return fig, ax
 
 
-def tabulate_score(prefix):
+def tabulate_score(prefix, return_ps=False):
     """Return a multiindexed DF of JACKS results.
 
     Table columns are sample names as given in the repmap at level 0,
@@ -220,6 +220,8 @@ def tabulate_score(prefix):
     sig_df = pd.DataFrame(index=genes_index, columns=sig_cols)
 
     for exp in ps.columns:
+        sig_df.loc[:, (exp, 'p_neg')] = ps[exp]
+        sig_df.loc[:, (exp, 'p_pos')] = 1-ps[exp]
         sig_df.loc[:, (exp, 'fdr_neg')] = multipletests(ps[exp], method='fdr_bh')[1]
         sig_df.loc[:, (exp, 'fdr_pos')] = multipletests(1 - ps[exp], method='fdr_bh')[1]
         sig_df.loc[:, (exp, 'jacks_score')] = genes[exp]
@@ -231,16 +233,20 @@ def tabulate_score(prefix):
         # get lowest not zero and set zeroes to 1/10 that value
         min_pos = min(score_table.loc[score_table['fdr_pos'] > 0, 'fdr_pos'])
         min_neg = min(score_table.loc[score_table['fdr_neg'] > 0, 'fdr_neg'])
-        #print(min_neg, min_pos)
+
         for fdri, fdr in enumerate(['fdr_pos', 'fdr_neg']):
             score_table.loc[score_table[fdr] == 0, fdr] = (min_pos, min_neg)[fdri] / 10
 
-        for mask, fdr in (pos, 'fdr_pos'), (neg, 'fdr_neg'):
-            score_table.loc[mask, 'fdr_log10'] = score_table.loc[mask, fdr]
+        for mask, posneg in (pos,'pos'), (neg, 'neg'):
+            score_table.loc[mask, 'fdr'] = score_table.loc[mask, 'fdr_'+posneg]
+            score_table.loc[mask, 'p'] = score_table.loc[mask, 'p_' + posneg]
 
-        sig_df.loc[:, (exp, 'fdr_log10')] = score_table['fdr_log10'].apply(lambda x: -np.log10(x))
+        sig_df.loc[:, (exp, 'fdr_log10')] = score_table['fdr'].apply(lambda x: -np.log10(x))
+        sig_df.loc[:, (exp, 'p_log10')] = score_table['p'].apply(lambda x: -np.log10(x))
         # put the columns in a good order
-        sig_df = sig_df.reindex(['jacks_score', 'fdr_log10', 'stdev'], axis=1, level=1, )
+        if not return_ps:
+            sig_df = sig_df.reindex(['jacks_score', 'fdr_log10', 'stdev'], axis=1, level=1, )
+
     return sig_df
 
 def tabulate_jacks(prefix):
