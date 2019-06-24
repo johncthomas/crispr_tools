@@ -79,6 +79,25 @@ def set_logger(log_fn):
     #mageckLOG.addHandler(hndlr)
 
 
+def write_repmap(sample_reps:Dict[str, list], ctrlmap:Dict[str, list], repmap_fn:str):
+    """Write a JACKS format replicate file.
+
+    sample_reps link the replicate names in the count file to given sample
+    names. ctrlmap specifies which samples are controls for which other samples."""
+    reptab = [['rep', 'samp', 'ctrl']]
+    for ctrl_samp, treat_samps in ctrlmap.items():
+        for ctrl_rep in sample_reps[ctrl_samp]:
+            reptab.append([ctrl_rep, ctrl_samp, ctrl_samp])
+        for treat in treat_samps:
+            for rep in sample_reps[treat]:
+                reptab.append([rep, treat, ctrl_samp])
+                # print([rep, samp, ctrl])
+
+    with open(repmap_fn, 'w') as f:
+        for line in reptab:
+            f.write('\t'.join(line) + '\n')
+
+
 def run_analysis(fn_counts, outdir, file_prefix,
                  sample_reps:Dict[str, list],
                  controls:Dict[str, Dict[str, list]],
@@ -131,22 +150,8 @@ def run_analysis(fn_counts, outdir, file_prefix,
         # Run JACKS
         if not charts_only and not skip_jacks:
             # make the jacks repmap: rep, samp, ctrl
-            reptab = [['rep', 'samp', 'ctrl']]
-            for ctrl_samp, treat_samps in ctrlmap.items():
-                for ctrl_rep in sample_reps[ctrl_samp]:
-                    reptab.append([ctrl_rep, ctrl_samp, ctrl_samp])
-                for treat in treat_samps:
-                    for rep in sample_reps[treat]:
-                        reptab.append([rep, treat, ctrl_samp])
-                        # print([rep, samp, ctrl])
-                        del rep
-                    del treat
             repmap_fn = outdir + ctrlgroup + '.repmap.tsv'
-            with open(repmap_fn, 'w') as f:
-                for line in reptab:
-                    f.write('\t'.join(line) + '\n')
-
-
+            write_repmap(sample_reps, ctrlmap, repmap_fn)
             pipeLOG.info(f"Running JACKS, mode and median normalised with {repmap_fn}")
             if jacks_eff_fn:
                 jacks_eff = jacks_eff_fn.format(ctrlgroup)

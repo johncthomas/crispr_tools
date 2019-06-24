@@ -4,7 +4,12 @@ from collections import Counter
 import gzip
 import argparse
 from pathlib import Path, PosixPath, WindowsPath
-from Levenshtein import distance as levendist
+try:
+    from Levenshtein import distance as levendist
+except ImportError:
+    print('Levenshtein package not present, fuzzy matching not available')
+    def levendist():
+        raise ModuleNotFoundError('Levenshtein package not installed')
 from typing import List
 import multiprocessing
 from functools import partial
