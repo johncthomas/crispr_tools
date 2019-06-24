@@ -106,11 +106,16 @@ def run_analysis(fn_counts, outdir, file_prefix,
                  charts_only = False, jacks_eff_fn=None,
                  skip_mageck = False, skip_jacks = False, skip_charts=False,
                  dont_log=False, exp_name='', analysis_name='',
-                 skip_extra_mageck = False, notes=''):
+                 skip_extra_mageck = False, jacks_kwargs:Dict=None,
+                 ctrl_genes:list=None, notes=''):
 
 
     call(['mkdir', outdir])
 
+    if jacks_kwargs is None:
+        jacks_kwargs = {}
+    if ctrl_genes:
+        jacks_kwargs['ctrl_genes'] = ctrl_genes
 
     for analysis_str in ('jacks_mode', 'jacks_median', 'mageck'):
         call(['mkdir', '-p', str(Path(outdir, analysis_str))])
@@ -164,9 +169,9 @@ def run_analysis(fn_counts, outdir, file_prefix,
                 jacks_eff = None
 
             jacks_args = (fn_counts, repmap_fn, fn_counts, 'rep', 'samp', None, 'ctrl', 'guide', 'gene',)
-            #jacks_kwargs =  dict()
-            runJACKS(*jacks_args, norm_type='mode', outprefix=jmode_prefix, reffile=jacks_eff)
-            runJACKS(*jacks_args, norm_type='median', outprefix=jmed_prefix, reffile=jacks_eff)
+
+            runJACKS(*jacks_args, norm_type='mode', outprefix=jmode_prefix, reffile=jacks_eff, **jacks_kwargs)
+            runJACKS(*jacks_args, norm_type='median', outprefix=jmed_prefix, reffile=jacks_eff, **jacks_kwargs)
 
         #########
         # *run MAGECK
@@ -378,7 +383,8 @@ def iter_comps(comparisons: List[dict], tab: pd.DataFrame=None):
                 yield ctrl_samp, comp
 
 def process_arguments(arguments:dict):
-
+    """deal with special keywords from the experiment yaml, and allow some
+    ambiguous syntax in the yaml."""
     samples = arguments['sample_reps'].keys()
     controls = arguments['controls']
     for ctrl_grp, ctrlmap in controls.items():

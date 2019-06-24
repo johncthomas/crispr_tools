@@ -1,2 +1,3 @@
 include crispr_tools/tests/test_counts.tsv
 include crispr_tools/tests/test_pipeline.yaml
+include files/Hart2017_TableS2_core_genes.txt
