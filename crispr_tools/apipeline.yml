@@ -1,0 +1,121 @@
+charts_only: false
+comparisons:
+- nt19a: 1gy
+- nt22a: 4gy
+- nt28a: 10gy
+- nt23b:
+  - 2camp
+  - 6camp
+  - 2_5carb
+  - 20carb
+  - 150etop
+  - 30etop
+controls:
+  D2:
+    D2: ALL
+  NT:
+    nt19a: 1gy
+    nt22a: 4gy
+    nt23b:
+    - 2camp
+    - 6camp
+    - 2_5carb
+    - 20carb
+    - 150etop
+    - 30etop
+    nt28a: 10gy
+  pretreat:
+    nt14a:
+    - 10gy
+    - 1gy
+    - 4gy
+    - nt19a
+    - nt22a
+    - nt28a
+    nt14b:
+    - 2camp
+    - 6camp
+    - 2_5carb
+    - 20carb
+    - 150etop
+    - 30etop
+    - nt14b
+    - nt23b
+dont_log: false
+file_prefix: ram_528-620
+fn_counts: counts/ramsay_528-620.counts.tsv
+jacks_eff_fn: false
+notes: This combines two different experiments done on the same clones, but with cells
+  being grown for different lengths of time depending on the treatment. The no treatment
+  (nt) samples are time matched -- all IR treatments began at the same time but continued
+  for different lengths.
+outdir: screens/ramsay_528-620/take1_all
+sample_reps:
+  10gy:
+  - 28B5
+  - 33B5
+  - 9B5
+  150etop:
+  - 28F4
+  - 33F4
+  - 9F4
+  1gy:
+  - 28B1
+  - 33B1
+  - 9B1
+  2_5carb:
+  - 28F5
+  - 33F5
+  - 9F5
+  20carb:
+  - 28F6
+  - 33F6
+  - 9F6
+  2camp:
+  - 28F1
+  - 33F1
+  - 9F1
+  30etop:
+  - 28F3
+  - 33F3
+  - 9F3
+  4gy:
+  - 28B3
+  - 33B3
+  - 9B3
+  6camp:
+  - 28F2
+  - 33F2
+  - 9F2
+  D2:
+  - 9D3
+  - 28D3
+  - 33D3
+  nt14a:
+  - 28B0
+  - 33B0
+  - 9B0
+  nt14b:
+  - 28E
+  - 33E
+  - 9E
+  nt19a:
+  - 28B2
+  - 33B2
+  - 9B2
+  nt22a:
+  - 28B4
+  - 33B4
+  - 9B4
+  nt23b:
+  - 28F0
+  - 33F0
+  - 9F0
+  nt28a:
+  - 28B6
+  - 33B6
+  - 9B6
+scatter_labels: 10
+skip_jacks: false
+skip_mageck: false
+volc_labels: 20

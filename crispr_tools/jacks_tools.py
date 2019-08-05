@@ -202,8 +202,11 @@ def scores_scatterplot(x, y, table=None, distance_gradient=True, label_pos=0, la
 def tabulate_score(prefix, return_ps=False):
     """Return a multiindexed DF of JACKS results.
 
-    Table columns are sample names as given in the repmap at level 0,
-    and then 'jacks_score, fdr_log10, fdr_neg, fdr_pos, stdev' at level 1"""
+    DF has multiindex, samples on level zero.
+
+    Level one, if return_ps is false: 'jacks_score', 'fdr_log10', 'stdev'
+    if True 'p' and 'p_log10' also included. This is for legacy reasons
+    no reason to not get p values."""
     # othertab = pd.DataFrame(columns=("IC10","IC90","D14"), index=essen['D14'].index)
     # Tables produced by jacks have columns that are the groups
     genes = pd.read_csv(prefix + '_gene_JACKS_results.txt', sep='\t', index_col=0)

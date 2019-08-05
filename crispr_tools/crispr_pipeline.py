@@ -12,6 +12,7 @@ import yaml
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+
 try:
     from jacks.jacks_io import runJACKS
 except ImportError:
@@ -35,8 +36,9 @@ from crispr_tools.tools import plot_read_violins, plot_ROC, plot_volcano, tabula
 from crispr_tools.jacks_tools import tabulate_score, scores_scatterplot, mahal_nocov
 from crispr_tools.version import __version__
 
-#todo add sample labels to sample_details for nice chart labels
+#todo deal with missing/empty kwargs better, eg no comparisons is fine.
 #todo? put each chunk of analysis into its own function
+
 
 """Go from FastQ files to completed JACKS/MAGeCK analysis. 
 fq->mapped_counts&violin plots are one command (count_reads.count_batch() ) 
@@ -107,10 +109,15 @@ def run_analysis(fn_counts, outdir, file_prefix,
                  skip_mageck = False, skip_jacks = False, skip_charts=False,
                  dont_log=False, exp_name='', analysis_name='',
                  skip_extra_mageck = False, jacks_kwargs:Dict=None,
-                 ctrl_genes:list=None, notes=''):
+                 mageck_kwargs:dict=None,
+                 ctrl_genes:list=None, notes='', **unused_args):
 
 
-    call(['mkdir', outdir])
+    #call(['mkdir', outdir])
+    try:
+        os.mkdir(outdir)
+    except FileExistsError:
+        pass
 
     if jacks_kwargs is None:
         jacks_kwargs = {}
@@ -176,6 +183,7 @@ def run_analysis(fn_counts, outdir, file_prefix,
         #########
         # *run MAGECK
         if not charts_only and not skip_mageck:
+
             mageck_pairs_done = []
             def _run_mageck(_ctrl_samp, _treat, prefix = mf_prefix):
                 mageck_str = "mageck test -k {counts} -t {treat} -c {ctrl} -n {outprefix}{ctrlnm}-{sampnm}"
@@ -190,9 +198,15 @@ def run_analysis(fn_counts, outdir, file_prefix,
                     ctrlnm=_ctrl_samp,
                     sampnm=_treat
                 )
-                pipeLOG.info(s)
-                call(s.split())
+                mag_additional_args = []
+                if mageck_kwargs:
+                    mag_additional_args = [f"--{_k} {_v}" for _k, _v in mageck_kwargs.items()]
+                mag_args = s.split()+mag_additional_args
+                # for some reason mageck fails to understand mag_args if you don't use shell=True
+                pipeLOG.info(' '.join(mag_args))
+                call(' '.join(mag_args), shell=True)
 
+            call("which mageck".split())
             pipeLOG.info('Running MAGeCK version '+check_output(["mageck","-v"]).decode())
 
             for ctrl_samp, treat_samps in ctrlmap.items():
@@ -414,7 +428,7 @@ def process_arguments(arguments:dict):
     return arguments
 
 if __name__ == '__main__':
-
+    print(__version__)
     parser = argparse.ArgumentParser(
         description="Run mageck and jacks analyses using a YAML file.\n "
                     "Use arguments below to override yaml options"
@@ -451,12 +465,18 @@ if __name__ == '__main__':
     parser.add_argument('--dont-log', action='store_true', dest='dont_log', default=None,
                         help="Don't write a log file.")
 
+
+
     # get arguments from the command line and the YAML
     clargs = parser.parse_args() # need to assign this before calling vars() for some reason
     cmd_args = vars(clargs)
     yml_args = yaml.safe_load(open(cmd_args['fn_yaml']))
     del cmd_args['fn_yaml']
 
+    # generate outdir from exp_name and analysis_name
+    if "outdir" not in yml_args:
+
+        yml_args["outdir"] = os.path.join(yml_args["exp_name"],  yml_args["analysis_name"])
 
 
     # over write yml_args with any specified in the command line

@@ -8,9 +8,10 @@ try:
 except ModuleNotFoundError:
     def adjust_text(*args, **kwargs):
         pass
-
+from typing import List, Union, Dict, Collection, Iterable
 from pathlib import Path, PosixPath, WindowsPath
 import pandas as pd
+#import multiprocessing as mp
 
 __version__ = 'v1.4.0'
 
@@ -83,16 +84,30 @@ def size_factor_normalise(cnt_tab, log=True):
     return out_tab
 
 
-def plot_read_violins(tab, column_labs=None, log=True, size_norm=False, ax=None):
+def plot_read_violins(tab, rows=1, column_labs=None, log=True, size_norm=False, ax=None):
     """Takes counts table, does log2 (optionally size factor normalises)
     and produces violin density plots.
 
     figsize is (3*n, 6)
 
-    Returns a plt.Axes"""
-    if ax is None:
-        fig, ax = plt.subplots(figsize=(3 * len(tab.columns), 6))
+    Returns a plt.Axes
 
+    High nrows sometimes results in empty rows."""
+
+    samp_per_row = tab.shape[1] // rows
+    # if the samp per row does not divide cleanly into the nsamps
+    #   an extra row is required for the remainders
+    if tab.shape[0] % samp_per_row:
+        samp_per_row += 1
+
+    if ax is None:
+        fig, axes = plt.subplots(rows, 1, figsize=(3 * samp_per_row, 6 * rows))
+    else:
+        axes = ax
+    if rows == 1:
+        axes = [axes]
+
+    # remove nonnumeric columns
     tab = tab.copy()
     # drop any text columns
     nonumeric = tab.columns[tab.iloc[0, :].apply(type) == str]
@@ -101,22 +116,35 @@ def plot_read_violins(tab, column_labs=None, log=True, size_norm=False, ax=None)
             nonumeric,
             axis=1
         )
+    # transform the data
     if size_norm:
         tab = size_factor_normalise(tab, log=log)
     elif log:
         tab = tab.__add__(1).apply(np.log2)
 
+    # apply specified column labels
     if column_labs is None:
         column_labs = tab.columns
 
-    ax.violinplot(tab.T, )
-    ax.boxplot(tab.T, widths=0.2)
-    ax.set_xticks(range(1, len(column_labs) + 1))
-    ax.set_xticklabels(column_labs, rotation=40)
-    return ax
+    for rowi, ax in enumerate(axes):
+        inds = slice(rowi * samp_per_row, (1 + rowi) * samp_per_row)
+        stab = tab.iloc[:, inds].T
+        # this is poo
+        if stab.shape[0] == 0:
+            break
+        ax.violinplot(stab, widths=0.8)
+        ax.boxplot(stab, widths=0.2)
+        ax.set_xticks(range(1, samp_per_row + 1))
+        ax.set_xticklabels(column_labs[inds], rotation=40)
+    plt.tight_layout()
+    if rows == 1:
+        return axes[0]
+    else:
+        return axes
 
 
 def plot_ROC(tab, things_oi, label=None, ax = None):
+    #todo: make things_oi work as any kind of iterable (currently pd.Series)
     """Tab needs to be a series or dataframe containing values used to
     order the tab index."""
     if ax is None:
@@ -283,16 +311,22 @@ def tabulate_mageck(prefix):
         tab.loc[:, 'lfc'] = mtab.loc[:, 'neg|lfc']
         # turn sep pos|neg columns into one giving only the appropriate LFC/FDR
         pos = mtab['pos|lfc'] > 0
-        tab.loc[pos, 'fdr'] = mtab.loc[pos, 'pos|fdr']
-        tab.loc[~pos, 'fdr'] = mtab.loc[~pos, 'neg|fdr']
-        tab.loc[:, 'fdr_log10'] = tab.fdr.apply(lambda x: -np.log10(x))
+        for stat in 'fdr', 'p-value':
+            tabk = stat.replace('-value', '')
+            tab.loc[pos, tabk] = mtab.loc[pos, f'pos|{stat}']
+            tab.loc[~pos, tabk] = mtab.loc[~pos, f'neg|{stat}']
+            tab.loc[:, f'{tabk}_log10'] = tab[tabk].apply(lambda x: -np.log10(x))
 
         sampnm = fn.split(prefix.stem)[1].split('.gene_s')[0]
         tables[sampnm] = tab
     if tab is None:
         raise FileNotFoundError('Failed to find any .gene_summary.txt files with prefix '+str(prefix))
-    tbcolumns = pd.MultiIndex.from_product([sorted(tables.keys()), ['lfc', 'fdr', 'fdr_log10']],
-                                           1)
+
+    # create multiindex using the sample names and stats
+    tbcolumns = pd.MultiIndex.from_product(
+        [sorted(tables.keys()), ['lfc', 'fdr', 'fdr_log10', 'p', 'p_log10']],
+        1
+    )
     table = pd.DataFrame(index=tab.index, columns=tbcolumns)
     for exp, tab in tables.items():
         table[exp] = tab
@@ -330,3 +364,27 @@ def pca_grid(pca, hue_deet, style_deet, max_components=5, also_return_fig=False)
         return (fig, axes)
     else:
         return axes
+
+
+def write_repmap(sample_reps:Dict[str, list], ctrlmap:Dict[str, list], repmap_fn:str):
+    """Write a JACKS format replicate file.
+
+    Args:
+        sample_reps: maps given sample names to replicate names in the count file.
+        ctrlmap: specifies which samples are controls for which other samples.
+        repmap_fn: path to file that will be written.
+    Returns:
+        None
+        """
+    reptab = [['rep', 'samp', 'ctrl']]
+    for ctrl_samp, treat_samps in ctrlmap.items():
+        for ctrl_rep in sample_reps[ctrl_samp]:
+            reptab.append([ctrl_rep, ctrl_samp, ctrl_samp])
+        for treat in treat_samps:
+            for rep in sample_reps[treat]:
+                reptab.append([rep, treat, ctrl_samp])
+                # print([rep, samp, ctrl])
+
+    with open(repmap_fn, 'w') as f:
+        for line in reptab:
+            f.write('\t'.join(line) + '\n')

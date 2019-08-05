@@ -1,5 +1,6 @@
 ### /usr/bin/env python3
 import os, sys
+import pandas as pd
 from collections import Counter
 import gzip
 import argparse
@@ -248,6 +249,31 @@ def count_batch(fn_or_dir, slicer, fn_prefix='', seq_len=None, seq_offset=0, fn_
 
     return out_files
 
+def get_count_table_from_file_list(file_list:List[Path], splitter='.raw', remove_prefix=True) -> pd.DataFrame:
+    """Put the contents of a list of raw count filepaths into a DF.
+    Args:
+        file_list: list of files
+        splitter: The substring that follows the sample name, used to extract
+        the sample name.
+        remove_prefix: If True, <sample_name>.split('.')[1] is performed.
+    Returns:
+        pd.DataFrame indexed by sequence with integer counts from each file.
+        Column names derived from the file names.
+    """
+    rawcnt = {} #  will be cast to DF
+    for fn in file_list:
+        fn = Path(fn)
+        # filtering of fn done before here
+        sn = fn.name.split(splitter)[0]
+        if remove_prefix:
+            sn = sn.split('.')[1]
+        print('sample header:', sn)
+        rawcnt[sn] = pd.read_csv(fn, index_col=0, header=None, sep='\t')[1]
+        # rawcnt = pd.concat([rawcnt, samp], 1)
+
+    return pd.DataFrame(rawcnt).fillna(0).astype(int)
+
+
 def map_counts(fn_or_dir, lib, guidehdr='guide', genehdr='gene',
                drop_unmatched=False, report=False, splitter='.raw',
                remove_prefix=True, out_fn=None, fuzzy=False, fuzzy_threads=None,
@@ -262,7 +288,7 @@ def map_counts(fn_or_dir, lib, guidehdr='guide', genehdr='gene',
     if fuzzy and fuzzy_threads is None:
         fuzzy_threads = multiprocessing.cpu_count() - 1
 
-    import pandas as pd
+
     if type(lib) in (str, PosixPath, WindowsPath):
         lib = str(lib)
         if lib.endswith('.csv'):
@@ -280,16 +306,7 @@ def map_counts(fn_or_dir, lib, guidehdr='guide', genehdr='gene',
     file_list = get_file_list(fn_or_dir)
     file_list = [f for f in file_list if splitter in str(f)]
 
-    rawcnt = {} #  will be cast to DF
-    for fn in file_list:
-        # filtering of fn done before here
-        sn = fn.name.split(splitter)[0]
-        if remove_prefix:
-            sn = sn.split('.')[1]
-        print('sample header:', sn)
-        rawcnt[sn] = pd.read_csv(fn, index_col=0, header=None, sep='\t')[1]
-        # rawcnt = pd.concat([rawcnt, samp], 1)
-    rawcnt = pd.DataFrame(rawcnt).fillna(0).astype(int)
+    rawcnt = get_count_table_from_file_list(file_list, splitter, remove_prefix)
 
     # we should have a table indexed by the sequences
     if fuzzy:

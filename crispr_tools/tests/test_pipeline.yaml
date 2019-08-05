@@ -1,0 +1,60 @@
+# arguments to be used by pipeline.run_analysis()
+# relative paths are relative to where the main script is called from
+fn_counts: tests/test_counts.tsv
+outdir: tests/run_test
+file_prefix: itsatest
+volc_labels: 3
+scatter_labels: 3
+charts_only: False
+jacks_eff_fn: False # set to path of guide file if using
+skip_mageck: False
+skip_jacks: False
+dont_log: False
+skip_charts: False
+sample_reps:
+  # replicate name as in the count file, 
+  # mapped to sample name, defined here.
+  #   samp1: [rep1, rep2, rep3 ]
+  D3:
+    - 9D3
+    - 28D3
+    - 33D3
+  condition_A: [9B3, 28B3, 33B3]
+  condition_B: [9B4, 28B4, 33B4]
+
+controls:
+  # samples to use as controls. 
+  # Control groups must be defined,
+  # a control group is analysed together in JACKS, and output tables
+  # will include control group information for all analyses.
+  # ALL and EXCEPT are special values.
+
+  # control_group:
+  #   control_samp1: [samp2, samp3]
+  #   control_samp2: [samp4, samp5]
+
+  # samp_48h will be used for all other samples
+  # D2:
+  #   samp_48h: ALL
+
+  #  
+  # pretreat:
+  #   samp_ctrl: 
+  #     EXCEPT:
+  #       - samp_48h
+  #       - sampx
+
+  D3: 
+    D3: ALL
+  cross_treat: 
+    condition_A: condition_B
+  
+comparisons:
+  # - sampA:  [sampX, sampY]
+  # the key (sampA) should typically be a control, and will be plotted
+  # on the X axis of charts
+  - condition_A: condition_B
+
+# anything added here will just get printed to the log file
+notes:
+  This is a test.
