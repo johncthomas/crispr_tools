@@ -98,13 +98,17 @@ def fuzzy_match(query_seq, lib_seqs, max_dist=3):
     If so, return the library sequence that is close,
     otherwise return None."""
 
-    close_mask = lib_seqs.apply(lambda x: levendist(x, query_seq)) <= max_dist
+    closeness = lib_seqs.map(lambda x: levendist(x, query_seq))
+    # check the closest seq(s) are sufficiently close
+    if min(closeness) > max_dist:
+        return None
+    # check only one is close enough
+    close_mask = closeness == min(closeness)
     if sum(close_mask) == 1:
         return lib_seqs.loc[close_mask].values[0]
     else:
         # explicitly...
         return None
-
 
 def get_file_list(files_dir) -> List[os.PathLike]:
     """Pass single string or list of stings, strings that are files go on the
@@ -346,7 +350,6 @@ def map_counts(fn_or_dir, lib, guidehdr='guide', genehdr='gene',
     # the absent guides
     missing = lib.loc[~lib.index.isin(rawcnt.index), :].index
 
-
     # get the present guides
     matches = rawcnt.loc[rawcnt.index.isin(lib.index), :].index
     if report:
@@ -393,9 +396,10 @@ def map_counts(fn_or_dir, lib, guidehdr='guide', genehdr='gene',
 
 
 
-
+class MAIN:
+    pass
 if __name__ == '__main__':
-    print('v', __version__)
+    print('count_reads.py version', __version__)
     cpus = multiprocessing.cpu_count()
     if cpus > 10:
         cpus = 10

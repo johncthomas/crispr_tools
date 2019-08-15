@@ -173,7 +173,8 @@ def plot_stability(ys_df, ax:plt.Axes=None):
     ys_df.mean(1).plot(marker='o', color='k')
     plt.ylim(0)
     plt.xlabel('Proportion of total reads')
-    plt.ylabel('Mean stdev of scores across replicates')
+    plt.ylabel('Median stdev of resampled gene scores, per sample')
+    plt.tight_layout()
     return ax
 
 

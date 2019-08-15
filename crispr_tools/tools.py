@@ -302,8 +302,10 @@ def tabulate_mageck(prefix):
     tables = {}
     tab = None
     for fn in os.listdir(prefix.parent):
+        # select correct files, the '._' are mac files that get caught on unix filesystem
         if not fn.endswith('.gene_summary.txt') or \
-                prefix.parts[-1] not in fn:
+                prefix.parts[-1] not in fn or \
+                fn.startswith('._'):
             continue
         #mtab from the mageck output, reformatted into tab
         mtab = pd.read_csv(prefix.parent / fn, '\t', index_col=0)

@@ -38,6 +38,8 @@ from crispr_tools.version import __version__
 
 #todo deal with missing/empty kwargs better, eg no comparisons is fine.
 #todo? put each chunk of analysis into its own function
+#todo QC by default!!
+#todo save yaml in output dir
 
 
 """Go from FastQ files to completed JACKS/MAGeCK analysis. 
