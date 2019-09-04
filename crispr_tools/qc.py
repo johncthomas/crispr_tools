@@ -7,9 +7,26 @@ from typing import List, Union, Dict, Collection, Iterable
 from pathlib import Path, PosixPath, WindowsPath
 import pandas as pd
 from itertools import combinations
-from crispr_tools.tools import drop_nonumeric
+from crispr_tools.tools import drop_nonumeric, size_factor_normalise
 
 #todo test plot_clonal_X
+
+def get_clonal_lfcs(lncounts, ctrl_dict:dict, sample_reps:dict, lognorm=False):
+    """get a DF of clonal LFCs using the ctrl/sample pairs specified by ctrl_dict.
+    Assumes that clones are grouped by order of appearance in sample_reps"""
+    _lfcs = {}
+
+    if lognorm:
+        lncounts = size_factor_normalise(lncounts)
+
+    for ctrl_samp, treat_samples in ctrl_dict.items():
+        for trt_samp in treat_samples:
+            # we shall assume that the clones are int he same order in sample_reps
+            treat_clone_pairs = zip(sample_reps[ctrl_samp], sample_reps[trt_samp])
+            for c, t in treat_clone_pairs:
+                _lfcs[c+'-'+t] = lncounts[t] - lncounts[c]
+    return pd.DataFrame(_lfcs)
+
 
 def plot_clonal_counts(count:pd.DataFrame, sample_reps:Dict[str, List[str]], file_fmt_str='',
                        title_fmt_str="Clonal counts, {}", show_plt=False):
@@ -53,6 +70,56 @@ def plot_clonal_counts(count:pd.DataFrame, sample_reps:Dict[str, List[str]], fil
                 plt.show()
             else:
                 plt.close()
+
+
+
+
+def clustermap(df:pd.DataFrame, z_score:int=None, xlabel='',
+               quantile:float=0, cmkwargs:dict=None):
+    """
+    not tested
+    df should have samples as columns.
+
+    args:
+        z_score: 0 or 1 applies the transformation to rows (0) or columns (1),
+        none uses raw data.
+
+        quantile: use on the the most variable quantile in the heat map, 0 uses
+        all data and 0.99 the top 1% most variable.
+
+        cmkwargs: additional kwargs passed to sns.clustermap(**cmkwargs)
+    """
+
+    #todo: fix 0 = middle of the cmap
+    #todo: put the color bar inthe top left
+    #todo: use col_colors to identify treats and clones by default. (probably rename the function)
+
+    if cmkwargs is None:
+        cmkwargs = {}
+    guide_var = df.var(1).sort_values(ascending=False)
+    # most_var = guide_var.head(300).index
+    most_var = guide_var > guide_var.quantile(quantile)
+
+    # do the cluster
+    cm = sns.clustermap(df.loc[most_var], cmap='coolwarm', z_score=z_score, **cmkwargs)
+    # cm.savefig(f'charts/heatmap dendrogram of LFCs by clone {grp} most var.png', dpi=150)
+    hm = cm.ax_heatmap.get_position()
+    plt.setp(cm.ax_heatmap.yaxis.get_majorticklabels(), fontsize=6)
+    cm.ax_heatmap.set_position([hm.x0, hm.y0, hm.width, hm.height * 1.5])
+    new_hm = cm.ax_heatmap.get_position()
+    col = cm.ax_col_dendrogram.get_position()
+
+    # set the col dendrogram y0 to the heatmap's y1
+    cm.ax_col_dendrogram.set_position([col.x0, new_hm.y1 + 0.12, col.width, col.height])
+    # stretch out the row dend
+    rowd = cm.ax_row_dendrogram.get_position()
+    cm.ax_row_dendrogram.set_position([rowd.x0, rowd.y0, rowd.width, new_hm.height])
+    cm.ax_heatmap.xaxis.tick_top()
+    for tick in cm.ax_heatmap.get_xticklabels():
+        tick.set_rotation(90)
+    cm.ax_heatmap.set_xlabel(f"{xlabel} {quantile*100}%")
+    # cm.savefig(f'charts/heatmap dendrogram of LFCs by clone {grp} {quantile*100} percentile variance.png', dpi=150)
+
 
 
 def plot_clonal_lfc(count:pd.DataFrame, sample_reps:Dict[str, List[str]],
@@ -100,7 +167,7 @@ def plot_clonal_lfc(count:pd.DataFrame, sample_reps:Dict[str, List[str]],
                     lfcy = count[y_pair[1]] - count[y_pair[0]]
 
                     plt.hexbin(lfcx, lfcy, bins='log', gridsize=40)
-                    plt.xlabel(x_pair);
+                    plt.xlabel(x_pair)
                     plt.ylabel(y_pair)
                     if title_fmt_str:
                         plt.title(title_fmt_str.format(ctrl_samp, trt_samp))
@@ -109,4 +176,6 @@ def plot_clonal_lfc(count:pd.DataFrame, sample_reps:Dict[str, List[str]],
 
                 plt.tight_layout()
                 plt.savefig(file_fmt_str.format(ctrl_samp, trt_samp), dpi=150)
-                plt.show()
+                if show_plt:
+                    plt.show()
+

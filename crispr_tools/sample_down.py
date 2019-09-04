@@ -2,7 +2,7 @@ import os, logging
 import numpy as np
 import matplotlib.pyplot as plt
 logging.getLogger('matplotlib').setLevel(logging.WARNING)
-from crispr_tools import tabulate_score, tabulate_mageck
+from crispr_tools import tabulate_score, tabulate_mageck, size_factor_normalise
 # from scipy import stats
 # import seaborn as sns
 # from pathlib import Path
@@ -74,24 +74,62 @@ def resample_table_by_fraction(count_tab:pd.DataFrame, fraction:float, processor
     return resamped_tab
 
 def int2az(x):
-    """count using leters a-z"""
+    """count using leters a-z.
+
+    int2az(0) == 'a'
+    int2az(500) == 'tg' """
     digits = [chr(i) for i in range(97, 95+28)]
     base = len(digits)
     if x < 0:
         return "-" + int2az(-x)
     return ("" if x < base else int2az(x // base)) + digits[x % base]
 
-def resample_and_run_jacks(count_tab:pd.DataFrame,
-                           repmap_fn:Union[str, os.PathLike],
-                           fractions:List[float],
-                           nreps:int,
-                           tabulate:True,
-                           working_dir:Union[str, os.PathLike],
-                           processors:int=None,
-                           jacks_kwargs=None) -> Dict[float, Dict[str, pd.DataFrame]]:
-    """Run a resampling experiment. The count_tab is resampled, to size
-    given in fractions, nreps times per fraction. Returns dict of dict of DF
-    prodcued by tabulate_score, keyed first by fraction and then rep letter.
+
+def iter_reps(nreps, fractions):
+    """get the product of reps and fractions, yield strings of
+    fractions, letters for each rep and frac+rep"""
+    for _rep in range(nreps):
+
+        _letter = int2az(_rep)
+        for _frac in fractions:
+            _k = str(_frac) + _letter
+            yield _frac, _letter, _k
+
+
+def get_resampled_tabs(count_tab:pd.DataFrame,
+                       fractions:List[float],
+                       nreps:int,
+                       processors:int=None):
+    if processors is None:
+        processors = mp.cpu_count()
+        if processors > 1:
+            processors -= 1
+
+    resamped_tabs = {}
+
+    # tables will be keyed by fraction and letters starting with 'a' per rep
+    for frac, letter, k in iter_reps(nreps, fractions):
+        resamped_tabs[k] = resample_table_by_fraction(count_tab.copy(), frac, processors)
+
+    return resamped_tabs
+
+
+def resample_run_jacks(count_tab:Union[pd.DataFrame, Dict[str, pd.DataFrame]],
+                       repmap_fn:Union[str, os.PathLike],
+                       fractions:List[float],
+                       nreps:int,
+                       tabulate:True,
+                       working_dir:Union[str, os.PathLike],
+                       processors:int=None,
+                       do_resample=True,
+                       jacks_kwargs=None) -> Dict[float, Dict[str, pd.DataFrame]]:
+    """Run a resampling experiment. If do_resample is True, the count_tab is
+    resampled, to size given in fractions, nreps times per fraction. If
+    do_resample is False, a dictionary of already resampled counts should be
+    supplied as count_tab.
+
+    Returns dict of dict of DF prodcued by tabulate_score, keyed first by
+    fraction and then rep letter.
 
     repmap is in the JACKS format."""
     #todo make work with other analyses
@@ -104,29 +142,18 @@ def resample_and_run_jacks(count_tab:pd.DataFrame,
         jacks_kwargs = {}
     jkwgs = dict(ctrl_sample_hdr='ctrl', gene_hdr='gene', sgrna_hdr='guide')
     jkwgs.update(jacks_kwargs)
-    if processors is None:
-        processors = mp.cpu_count()
-        if processors > 1:
-            processors -= 1
 
     assert os.path.isdir(working_dir)
-    resamped_tabs = {}
 
-    def _rep_iter():
-        for _rep in range(nreps):
+    if do_resample:
+        resamped_tabs = get_resampled_tabs(count_tab, fractions, nreps, processors)
+    else:
+        resamped_tabs = count_tab
 
-            _letter = int2az(_rep)
-            for _frac in fractions:
-                _k = str(_frac) + _letter
-                yield _frac, _letter, _k
-
-    # tables will be keyed by fraction and letters starting with 'a' per rep
-    for frac, letter, k in _rep_iter():
-        resamped_tabs[k] = resample_table_by_fraction(count_tab.copy(), frac, processors)
-
+    # the output
     tables = {f:{} for f in fractions}
 
-    for frac, letter, k in _rep_iter():
+    for frac, letter, k in iter_reps(nreps, fractions):
         tab = resamped_tabs[k]
         tabpath = f"{working_dir}/count_{k}.tsv"
         tab.to_csv(tabpath, '\t')
@@ -140,16 +167,43 @@ def resample_and_run_jacks(count_tab:pd.DataFrame,
     else:
         return None
 
+
+def resample_calc_lfc(count_tab:pd.DataFrame,
+                   ctrl_map:Union[str, List[str]],
+                   fractions:List[float],
+                   nreps:int,
+                   tabulate:True,
+                   working_dir:Union[str, os.PathLike],
+                   processors:int=None,
+                   do_log=True):
+
+    # output tables
+    tables = {f:{} for f in fractions}
+
+    resamped_tabs = get_resampled_tabs(count_tab, fractions, nreps, processors)
+
+    #
+    for frac, letter, k in iter_reps(nreps, fractions):
+        tab = size_factor_normalise(resamped_tabs[k])
+
+
+
+
 def calc_stability(tables=Dict[float, Dict[str, pd.DataFrame]],
-                   score_key='jacks_score', ):
+                   score_key=slice(None,None),):
     """Stability is the stdev per gene across multiple resampled
     replicates at different fractions. The median of these are taken per
     sample per fraction.
 
     Returns DF with fractions as column index, and samples as row index."""
-    all_ys = {}
+    # todo don't just take the median, optionally take a set of quantiles
+
     fractions = list(tables.keys())
-    samples = tables[fractions[0]]['a'].columns.levels[0]
+
+    try:
+        samples = tables[fractions[0]]['a'].columns.levels[0]
+    except AttributeError:
+        samples = tables[fractions[0]]['a'].columns
 
     out_df = pd.DataFrame(index=fractions, columns=samples)
 
@@ -161,7 +215,6 @@ def calc_stability(tables=Dict[float, Dict[str, pd.DataFrame]],
             out_df.loc[frac, samp] = pd.DataFrame(scores).std(1).median()
 
     return out_df
-
 
 def plot_stability(ys_df, ax:plt.Axes=None):
 
@@ -179,11 +232,10 @@ def plot_stability(ys_df, ax:plt.Axes=None):
 
 
 def test_resampling():
-
     print(os.getcwd())
     tab = pd.read_table('tests/test_counts.tsv', index_col=0)
     repmap =  'tests/run_testD3.repmap.tsv'
-    tables = resample_and_run_jacks(
+    tables = resample_run_jacks(
         tab,
         repmap_fn=repmap,
         fractions=[0.1,0.2],

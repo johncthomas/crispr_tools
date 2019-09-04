@@ -13,6 +13,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+from crispr_tools import qc, tools, jacks_tools
+
 try:
     from jacks.jacks_io import runJACKS
 except ImportError:
@@ -38,8 +40,10 @@ from crispr_tools.version import __version__
 
 #todo deal with missing/empty kwargs better, eg no comparisons is fine.
 #todo? put each chunk of analysis into its own function
+#todo check validity of every file and option before starting.
 #todo QC by default!!
 #todo save yaml in output dir
+#todo handle different analyses better, making it easy to add new ones and turn of during analysis
 
 
 """Go from FastQ files to completed JACKS/MAGeCK analysis. 
@@ -112,19 +116,27 @@ def run_analysis(fn_counts, outdir, file_prefix,
                  dont_log=False, exp_name='', analysis_name='',
                  skip_extra_mageck = False, jacks_kwargs:Dict=None,
                  mageck_kwargs:dict=None,
-                 ctrl_genes:list=None, notes='', **unused_args):
+                 ctrl_genes:str=None, notes='', **unused_args):
 
 
     #call(['mkdir', outdir])
-    try:
-        os.mkdir(outdir)
-    except FileExistsError:
-        pass
+
+        #haaaacky, but the fact it cant make a dir and subdir at the same time is annoying
+    p = str(outdir)
+    for i in range(len(p)):
+        print(p)
+        d = p.split('/')[:i+1]
+        try:
+            os.mkdir('/'.join(d))
+        except FileExistsError:
+            pass
 
     if jacks_kwargs is None:
         jacks_kwargs = {}
+
     if ctrl_genes:
         jacks_kwargs['ctrl_genes'] = ctrl_genes
+        #todo write a temp file for mageck, and clean up all temp files (put paths in a list)
 
     for analysis_str in ('jacks_mode', 'jacks_median', 'mageck'):
         call(['mkdir', '-p', str(Path(outdir, analysis_str))])
@@ -398,9 +410,10 @@ def iter_comps(comparisons: List[dict], tab: pd.DataFrame=None):
                         continue
                 yield ctrl_samp, comp
 
+
 def process_arguments(arguments:dict):
     """deal with special keywords from the experiment yaml, and allow some
-    ambiguous syntax in the yaml."""
+    ambiguous syntax in the yaml. Also do some checking of validity"""
     samples = arguments['sample_reps'].keys()
     controls = arguments['controls']
     for ctrl_grp, ctrlmap in controls.items():
@@ -427,7 +440,25 @@ def process_arguments(arguments:dict):
     for k, v in arguments['sample_reps'].items():
         if type(v) == str:
             arguments['sample_reps'][k] = [v]
+
+    with open(arguments['fn_counts']) as f:
+        line = next(f)
+        if not '\t' in line:
+            raise ValueError('No tabs in file, is it comma seperated?\n\t'+line)
+
     return arguments
+
+
+def do_qcs(count, expd, jobs = ('pca', 'clustermap', 'violinplots', 'regressions')):
+    """Perform PCAs, clustermap, regressions between clones using both
+    normalised counts and lfcs."""
+
+    lncounts = tools.size_factor_normalise(count)
+    samp_reps = expd['sample_reps']
+    ctrl_map  = expd['controls']
+
+    plot_read_violins(lncounts, size_norm=False, log=False)
+
 
 if __name__ == '__main__':
     print(__version__)
