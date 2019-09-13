@@ -99,19 +99,36 @@ def iter_reps(nreps, fractions):
 def get_resampled_tabs(count_tab:pd.DataFrame,
                        fractions:List[float],
                        nreps:int,
-                       processors:int=None):
+                       processors:int=None) -> Dict[float, Dict[str, pd.DataFrame]]:
     if processors is None:
         processors = mp.cpu_count()
         if processors > 1:
             processors -= 1
 
-    resamped_tabs = {}
+    resamped_tabs = {frac:{} for frac in fractions}
 
     # tables will be keyed by fraction and letters starting with 'a' per rep
     for frac, letter, k in iter_reps(nreps, fractions):
-        resamped_tabs[k] = resample_table_by_fraction(count_tab.copy(), frac, processors)
+        resamped_tabs[frac][letter] = resample_table_by_fraction(count_tab.copy(), frac, processors)
 
     return resamped_tabs
+
+
+def get_lfc(resampled_tabs:Dict[float, Dict[str, pd.DataFrame]], clonal_ctrl_map:Dict[str, list], ):
+    """Get the LFC between matched replicates. Returned tables will be
+    stored in nested dicts with the same format as the input."""
+
+    lfc_tabs = {frac:{} for frac in resampled_tabs.keys()}
+
+    # go through the paired replicate names
+    for ctrl, samps in clonal_ctrl_map.items():
+        for frac, rep_tabs in resampled_tabs.items():
+            for rep, tab in rep_tabs.items():
+                lnc = size_factor_normalise(tab)
+                lfc_tabs[frac][rep] = lfc = pd.DataFrame(columns = samps, index = tab.index)
+                for samp in samps:
+                    lfc.loc[:, samp] = lnc[samp] - lnc[ctrl]
+    return lfc_tabs
 
 
 def resample_run_jacks(count_tab:Union[pd.DataFrame, Dict[str, pd.DataFrame]],
@@ -122,7 +139,7 @@ def resample_run_jacks(count_tab:Union[pd.DataFrame, Dict[str, pd.DataFrame]],
                        working_dir:Union[str, os.PathLike],
                        processors:int=None,
                        do_resample=True,
-                       jacks_kwargs=None) -> Dict[float, Dict[str, pd.DataFrame]]:
+                       jacks_kwargs=None):
     """Run a resampling experiment. If do_resample is True, the count_tab is
     resampled, to size given in fractions, nreps times per fraction. If
     do_resample is False, a dictionary of already resampled counts should be
@@ -154,7 +171,7 @@ def resample_run_jacks(count_tab:Union[pd.DataFrame, Dict[str, pd.DataFrame]],
     tables = {f:{} for f in fractions}
 
     for frac, letter, k in iter_reps(nreps, fractions):
-        tab = resamped_tabs[k]
+        tab = resamped_tabs[frac][letter]
         tabpath = f"{working_dir}/count_{k}.tsv"
         tab.to_csv(tabpath, '\t')
         respath = f"{working_dir}/jacks_{k}"
@@ -184,7 +201,7 @@ def resample_calc_lfc(count_tab:pd.DataFrame,
 
     #
     for frac, letter, k in iter_reps(nreps, fractions):
-        tab = size_factor_normalise(resamped_tabs[k])
+        tab = size_factor_normalise(resamped_tabs[frac][letter])
 
 
 
@@ -215,6 +232,7 @@ def calc_stability(tables=Dict[float, Dict[str, pd.DataFrame]],
             out_df.loc[frac, samp] = pd.DataFrame(scores).std(1).median()
 
     return out_df
+
 
 def plot_stability(ys_df, ax:plt.Axes=None):
 

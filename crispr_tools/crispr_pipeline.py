@@ -23,6 +23,7 @@ except ImportError:
     def runJACKS(*a, **k):
         raise ModuleNotFoundError('JACKS not installed!!!')
 
+
 # with open(pathlib.Path(__file__).parent/'version.txt') as f:
 #     __version__ = f.readline().replace('\n', '')
 
@@ -38,9 +39,12 @@ from crispr_tools.tools import plot_read_violins, plot_ROC, plot_volcano, tabula
 from crispr_tools.jacks_tools import tabulate_score, scores_scatterplot, mahal_nocov
 from crispr_tools.version import __version__
 
-#todo deal with missing/empty kwargs better, eg no comparisons is fine.
-#todo? put each chunk of analysis into its own function
+
+#todo: refactor the analysis so it's modulor and not just a massive function
 #todo check validity of every file and option before starting.
+#  eg:
+#   do all reps exsist in the count file
+#   are samples in controls defined in the sample reps
 #todo QC by default!!
 #todo save yaml in output dir
 #todo handle different analyses better, making it easy to add new ones and turn of during analysis
@@ -432,14 +436,17 @@ def process_arguments(arguments:dict):
     arguments['controls'] = controls
 
     # in case strings are passed instead of lists
-    for comp in arguments['comparisons']:
-        print(arguments['comparisons'])
-        for k, v in comp.items():
+    if 'comparisons' in arguments:
+        for comp in arguments['comparisons']:
+            print(arguments['comparisons'])
+            for k, v in comp.items():
+                if type(v) == str:
+                    comp[k] = [v]
+
+    if 'sample_reps' in arguments:
+        for k, v in arguments['sample_reps'].items():
             if type(v) == str:
-                comp[k] = [v]
-    for k, v in arguments['sample_reps'].items():
-        if type(v) == str:
-            arguments['sample_reps'][k] = [v]
+                arguments['sample_reps'][k] = [v]
 
     with open(arguments['fn_counts']) as f:
         line = next(f)
