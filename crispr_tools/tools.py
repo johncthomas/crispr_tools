@@ -25,14 +25,19 @@ __version__ = 'v1.4.0'
 
 
 #todo; pass plot_volcano a filen string and it loads the table
-#todo test pca grid
+# todo standardised tables for all results that allow you to pull out x, y wiht same sample and score keys
 import pkg_resources
 
-
+def list_not_str(thing):
+    """If thing is a string, wrap it in a list."""
+    if type(thing) is str:
+        return [thing]
+    return thing
 
 hart_path = pkg_resources.resource_filename('crispr_tools', 'files/Hart2017_TableS2_core_genes.txt')
 if os.path.isfile(hart_path):
     hart_list = pd.read_csv(hart_path, '\t', header=None)[0].values
+    hart_list = pd.Series(hart_list, index=hart_list)
 else:
     print('Hart list not found')
 
@@ -310,6 +315,11 @@ def tabulate_mageck(prefix):
         #mtab from the mageck output, reformatted into tab
         mtab = pd.read_csv(prefix.parent / fn, '\t', index_col=0)
         tab = pd.DataFrame(index=mtab.index)
+
+        # keep the pos and neg p values with better names
+        tab.loc[:, 'neg_p'] = mtab['neg|p-value']
+        tab.loc[:, 'pos_p'] = mtab['pos|p-value']
+
         tab.loc[:, 'lfc'] = mtab.loc[:, 'neg|lfc']
         # turn sep pos|neg columns into one giving only the appropriate LFC/FDR
         pos = mtab['pos|lfc'] > 0
@@ -326,7 +336,7 @@ def tabulate_mageck(prefix):
 
     # create multiindex using the sample names and stats
     tbcolumns = pd.MultiIndex.from_product(
-        [sorted(tables.keys()), ['lfc', 'fdr', 'fdr_log10', 'p', 'p_log10']],
+        [sorted(tables.keys()), ['lfc', 'fdr', 'fdr_log10', 'p', 'p_log10', 'pos_p', 'neg_p']],
         1
     )
     table = pd.DataFrame(index=tab.index, columns=tbcolumns)
