@@ -8,9 +8,11 @@ from pathlib import Path, PosixPath, WindowsPath
 import pandas as pd
 from itertools import combinations
 from crispr_tools.tools import drop_nonumeric, size_factor_normalise
+from crispr_tools.tools import list_not_str
 
 #todo test plot_clonal_X
-
+#todo clonal lfcs should be multi-indexed for other uses
+# like selecting control reps that match condition x and treat reps that match y
 def get_clonal_lfcs(lncounts, ctrl_dict:dict, sample_reps:dict, lognorm=False):
     """get a DF of clonal LFCs using the ctrl/sample pairs specified by ctrl_dict.
     Assumes that clones are grouped by order of appearance in sample_reps"""
@@ -20,6 +22,7 @@ def get_clonal_lfcs(lncounts, ctrl_dict:dict, sample_reps:dict, lognorm=False):
         lncounts = size_factor_normalise(lncounts)
 
     for ctrl_samp, treat_samples in ctrl_dict.items():
+        treat_samples = list_not_str(treat_samples)
         for trt_samp in treat_samples:
             # we shall assume that the clones are int he same order in sample_reps
             treat_clone_pairs = zip(sample_reps[ctrl_samp], sample_reps[trt_samp])
@@ -29,7 +32,7 @@ def get_clonal_lfcs(lncounts, ctrl_dict:dict, sample_reps:dict, lognorm=False):
 
 
 def plot_clonal_counts(count:pd.DataFrame, sample_reps:Dict[str, List[str]], file_fmt_str='',
-                       title_fmt_str="Clonal counts, {}", show_plt=False):
+                       title_fmt_str="Clonal counts, {}",):
     """plot the abundance of every replicate in the same sample against each other.
 
     Args:
@@ -55,10 +58,15 @@ def plot_clonal_counts(count:pd.DataFrame, sample_reps:Dict[str, List[str]], fil
         fig, axes = plt.subplots(1, n, figsize=(n * 5, 5))
         if n == 1:
             axes = [axes]
+        print(axes)
         for i, (ra, rb) in enumerate(combs):
+            if (ra not in count.columns) or (rb not in count.columns):
+                print(f"Key missing, on or both of {ra}, {rb}")
+                continue
+            x, y = count[ra], count[rb]
             plt.sca(axes[i])
-            #plt.figure(figsize=(5, 5))
-            plt.hexbin(count[ra], count[rb], bins='log', gridsize=40)
+
+            plt.hexbin(x, y, bins='log', gridsize=40)
             plt.xlabel(ra)
             plt.ylabel(rb)
             if title_fmt_str:
@@ -66,11 +74,6 @@ def plot_clonal_counts(count:pd.DataFrame, sample_reps:Dict[str, List[str]], fil
             plt.tight_layout()
             if file_fmt_str:
                 plt.savefig(file_fmt_str.format(samp_name), dpi=150)
-            if show_plt:
-                plt.show()
-            else:
-                plt.close()
-
 
 
 

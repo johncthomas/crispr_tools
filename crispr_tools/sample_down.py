@@ -212,6 +212,14 @@ def calc_stability(tables=Dict[float, Dict[str, pd.DataFrame]],
     replicates at different fractions. The median of these are taken per
     sample per fraction.
 
+    Args:
+        tables:
+            Keyed by fraction then letters.
+        score_key:
+            Used to retrieve the score for which stability is calculated if
+            the columns are a multiindex.
+            Default assumes that each column is a sample,
+
     Returns DF with fractions as column index, and samples as row index."""
     # todo don't just take the median, optionally take a set of quantiles
 
