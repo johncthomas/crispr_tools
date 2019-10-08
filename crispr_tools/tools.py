@@ -224,14 +224,14 @@ def plot_volcano(lfc, fdr, tab=None, title='', label_deplet=0, label_enrich=0,
         lfc = tab[lfc]
         fdr = tab[fdr]
 
-    sctkw = dict(marker='o', linestyle='none')
+    sctkw = dict(marker='o', linestyle='none', alpha=0.4)
     if plot_kw is not None:
         sctkw.update(plot_kw)
 
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(8, 12))
     #todo update to use scatter and set minimum matplotlib version
-    ax.plot(lfc, fdr, alpha=0.4, **sctkw)
+    ax.plot(lfc, fdr, **sctkw)
     # plt.yscale('log')
     # plt.gca().invert_yaxis()
     ax.set_title(title)

@@ -4,7 +4,11 @@ import matplotlib.cm as cm
 import pandas as pd
 from typing import Union, List, Dict, Tuple
 #import pickle
+from scipy import stats
 from scipy.stats import norm
+import statsmodels.api as sm
+
+
 from statsmodels.stats.multitest import multipletests
 try:
     from adjustText import adjust_text
@@ -153,8 +157,8 @@ def scores_scatterplot(x, y, table=None, distance_gradient=True, label_pos=0, la
     minlim = min(lim[0], lim[2])
     maxlim = max(lim[1], lim[3])
     plt.plot([minlim, maxlim], [minlim, maxlim], 'k--', alpha=0.2)
-    plt.plot([0, 0], [minlim, maxlim], 'g--')
-    plt.plot([minlim, maxlim], [0, 0], 'g--')
+    plt.plot([0, 0], [minlim, maxlim], 'g--', zorder=0)
+    plt.plot([minlim, maxlim], [0, 0], 'g--', zorder=0)
 
     if colrs is not None:
         sm = plt.cm.ScalarMappable(cmap=cm.get_cmap('viridis'))
@@ -369,6 +373,37 @@ def mahal_nocov(xs, xs_sd, ys, ys_sd, line_ig = (0,1), **cp_kwargs):
 
     return euc_dist, ps, pd.Series(mahal_dist)
 
+
+def get_jacks_stats(df, sampx, sampy):
+    # duplicated from crispr_screen_viewer.scatter
+    """returns ps, fdr and size of difference between X and Y distributions.
+    Negative values for those below the line. Is log10.
+
+    a dataframe with columns:
+        'p-value', 'FDR', 'Difference'
+        """
+    # if you add more, update STAT_KEYS
+    X = df[sampx]
+    Y = df[sampy]
+    # We can assume the subcol names i guess
+    diff = abs(X.jacks_score - Y.jacks_score)
+    sumstd = np.sqrt(X.stdev**2 + Y.stdev**2)
+    # get bool array, index will be
+    negative = (Y.jacks_score < X.jacks_score).values
+    # cdf value at zero
+    ps = stats.norm(diff, sumstd).cdf(0)
+    fdr = sm.stats.multipletests(ps, 0.1, 'fdr_bh')[1]
+    ps, fdr = [-np.log10(s) for s in (ps, fdr)]
+    ps[negative] = 0-ps[negative]
+    fdr[negative] = 0-fdr[negative]
+
+    DISTANCES = {
+        'p-value': ps,
+        'FDR': fdr,
+        'Difference': diff
+    }
+
+    return pd.DataFrame(DISTANCES)
 
 
 # from crispr_tools.tools import tabulate_mageck
