@@ -20,7 +20,7 @@ setup(
     author = 'John C. Thomas',
     author_email = 'jcthomas000@gmail.com',
     packages=find_packages(exclude=['contrib', 'docs', 'tests']),
-    package_data={'files':['files/Hart2017_TableS2_core_genes.txt']},
+    #package_data={'files':['files/Hart2017_TableS2_core_genes.txt']},
     install_requires = [
         'numpy', 'scipy', 'matplotlib', 'pandas', 'shapely', 'pyyaml', 'statsmodels', 'seaborn', 'attrdict'
     ],
