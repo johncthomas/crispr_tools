@@ -8,6 +8,9 @@ from subprocess import call, check_output
 from pathlib import Path
 from itertools import combinations
 
+from argparse import Namespace
+from attrdict import AttrDict, AttrMap
+
 import yaml
 import numpy as np
 import pandas as pd
@@ -23,6 +26,9 @@ except ImportError:
     def runJACKS(*a, **k):
         raise ModuleNotFoundError('JACKS not installed!!!')
 
+from crispr_tools.drugz import drugZ_analysis
+
+from crispr_tools.tools import list_not_str
 
 # with open(pathlib.Path(__file__).parent/'version.txt') as f:
 #     __version__ = f.readline().replace('\n', '')
@@ -110,13 +116,76 @@ def write_repmap(sample_reps:Dict[str, list], ctrlmap:Dict[str, list], repmap_fn
             f.write('\t'.join(line) + '\n')
 
 
+# class PseudoArgs:
+#     """for holding attributes"""
+#     # https://stackoverflow.com/questions/4984647/accessing-dict-keys-like-an-attribute
+#     def __init__(self, *args, **kwargs):
+#         super(PseudoArgs, self).__init__(*args, **kwargs)
+#         self.__dict__ = self
+
+
+
+
+
+def run_drugZ(fn_counts, outdir, file_prefix,
+                 sample_reps:Dict[str, list],
+                 controls:Dict[str, Dict[str, list]], drugz_args:dict=None):
+
+    dzargs = AttrDict()
+    dzargs.infile = fn_counts
+    # defaults
+    dzargs.index_column = 0
+    dzargs.minobs = 1
+    dzargs.half_window_size = 500
+    dzargs.quiet = False
+    dzargs.pseudocount = 1
+    dzargs.fc_outfile=''
+
+    # not implimented in drugZ at time of writing
+    dzargs.remove_genes = None
+
+    dzargs.update(drugz_args)
+
+    call(['mkdir', '-p', str(Path(outdir, 'drugz', 'files'))])
+
+    pipeLOG.info('Running drugZ')
+
+    for control_group, control_map in controls.items():
+        for ctrl_samp, treat_samples in control_map.items():
+
+            dzargs.control_samples = ','.join(
+                list_not_str( sample_reps[ctrl_samp] )
+            )
+
+            treat_samples = list_not_str(treat_samples)
+            for treat_samp in treat_samples:
+
+                dzargs.drug_samples = ','.join(
+                    list_not_str(sample_reps[treat_samp])
+                )
+
+                dzargs.drugz_output_file = f"{outdir}/drugz/files/{file_prefix}.{ctrl_samp}-{treat_samp}.tsv".replace('//', '/')
+
+                drugZ_analysis(dzargs)
+
+
+
+    pipeLOG.info('Finished drugZ')
+
+
+def run_analysis_ver2():
+    #
+    pass
+
+
 def run_analysis(fn_counts, outdir, file_prefix,
                  sample_reps:Dict[str, list],
                  controls:Dict[str, Dict[str, list]],
                  comparisons: List[dict],
                  volc_labels=15, scatter_labels=10,
                  charts_only = False, jacks_eff_fn=None,
-                 skip_mageck = False, skip_jacks = False, skip_charts=False,
+                 skip_mageck = False, skip_jacks = False, skip_drugz=True,
+                 skip_charts=False,
                  dont_log=False, exp_name='', analysis_name='',
                  skip_extra_mageck = False, jacks_kwargs:Dict=None,
                  mageck_kwargs:dict=None,
@@ -233,6 +302,8 @@ def run_analysis(fn_counts, outdir, file_prefix,
                 for treat in treat_samps:
                     if treat == ctrl_samp:
                         continue
+                    # ctrls = ','.join(sample_reps[_ctrl_samp])
+                    # treats = ','.join(sample_reps[_treat])
                     _run_mageck(ctrl_samp, treat)
                     mageck_pairs_done.append((ctrl_samp, treat))
                 if not skip_extra_mageck:
@@ -242,6 +313,11 @@ def run_analysis(fn_counts, outdir, file_prefix,
                             mageck_pairs_done.append((c,t))
                             # maybe don't tablulate these at the moment.
                             _run_mageck(c, t, prefix=mf_prefix.replace(ctrlgroup, 'EXTRA'))
+
+
+        if not charts_only and not skip_drugz:
+            pipeLOG.info('Running DrugZ.')
+            run_drugZ(fn_counts, outdir, file_prefix, sample_reps, controls, {})
 
         ############
         #* Get tables
@@ -415,11 +491,13 @@ def iter_comps(comparisons: List[dict], tab: pd.DataFrame=None):
                 yield ctrl_samp, comp
 
 
-def process_arguments(arguments:dict):
-    """deal with special keywords from the experiment yaml, and allow some
-    ambiguous syntax in the yaml. Also do some checking of validity"""
-    samples = arguments['sample_reps'].keys()
-    controls = arguments['controls']
+def process_control_map(controls, samples):
+    """Get mappings ctrl_samp->[test_samps,] for each control group,
+    dealing with keywords ALL & EXCEPT.
+
+    Returns a copy of the input controls dict."""
+
+    controls = copy(controls)
     for ctrl_grp, ctrlmap in controls.items():
         #todo: if ctrlmap is a list assume a single control group and don't crash
         #print('ctrlmap',  ctrlmap)
@@ -433,6 +511,13 @@ def process_arguments(arguments:dict):
                 # maybe could have other keywords in the future
                 samps = [s for s in samples if s not in samps['EXCEPT']]
             ctrlmap[ctrl] = samps
+    return controls
+
+def process_arguments(arguments:dict):
+    """deal with special keywords from the experiment yaml, and allow some
+    ambiguous syntax in the yaml. Also do some checking of validity"""
+    samples = arguments['sample_reps'].keys()
+    controls = process_control_map(arguments['controls'], samples)
     arguments['controls'] = controls
 
     # in case strings are passed instead of lists
