@@ -13,6 +13,14 @@ from pathlib import Path, PosixPath, WindowsPath
 import pandas as pd
 #import multiprocessing as mp
 
+#hart_path = pkg_resources.resource_filename('crispr_tools', 'files/Hart2017_TableS2_core_genes.txt')
+#if os.path.isfile(hart_path):
+#    hart_list = pd.read_csv(hart_path, '\t', header=None)[0].values
+#    hart_list = pd.Series(hart_list, index=hart_list)
+#else:
+#    print('Hart list not found')
+from hart_list import hart_list
+
 __version__ = 'v1.4.0'
 
 # import logging
@@ -34,12 +42,6 @@ def list_not_str(thing):
         return [thing]
     return thing
 
-hart_path = pkg_resources.resource_filename('crispr_tools', 'files/Hart2017_TableS2_core_genes.txt')
-if os.path.isfile(hart_path):
-    hart_list = pd.read_csv(hart_path, '\t', header=None)[0].values
-    hart_list = pd.Series(hart_list, index=hart_list)
-else:
-    print('Hart list not found')
 
 def drop_nonumeric(tab):
     nonumeric = tab.columns[tab.iloc[0, :].apply(type) == str]
