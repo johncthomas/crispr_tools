@@ -173,21 +173,23 @@ def run_drugZ(fn_counts, outdir, file_prefix,
     pipeLOG.info('Finished drugZ')
 
 
-def _run_mageck(ctrls:str, treats:str, count:str, prefix:str):
+def call_mageck(control_samp:str, treat_samp:str, sample_reps:Dict[str, List[str]],
+                fn_counts:str, prefix:str, kwargs:dict):
     mageck_str = "mageck test -k {counts} -t {treat} -c {ctrl} -n {outprefix}{ctrlnm}-{sampnm}"
     # get the replicate strings
-
+    ctrls = ','.join(sample_reps[control_samp])
+    treats = ','.join(sample_reps[treat_samp])
     s = mageck_str.format(
         counts=fn_counts,
         treat=treats,
         ctrl=ctrls,
         outprefix=prefix,
-        ctrlnm=_ctrl_samp,
-        sampnm=_treat
+        ctrlnm=control_samp,
+        sampnm=treat_samp
     )
     mag_additional_args = []
-    if mageck_kwargs:
-        mag_additional_args = [f"--{_k} {_v}" for _k, _v in mageck_kwargs.items()]
+    if kwargs:
+        mag_additional_args = [f"--{_k} {_v}" for _k, _v in kwargs.items()]
     mag_args = s.split() + mag_additional_args
     # for some reason mageck fails to understand mag_args if you don't use shell=True
     pipeLOG.info(' '.join(mag_args))
@@ -196,11 +198,13 @@ def _run_mageck(ctrls:str, treats:str, count:str, prefix:str):
 def run_mageck_batch(sample_reps:Dict[str, list],
                      control_map:Dict[str, list],
                      count_fn:str,
-                     ):
-    mageck_pairs_done = []
+                     prefix:str,
+                     mag_kwargs:dict=None,
+                     skip_extra_mageck=True):
 
+    """Run mageck analyses using comparisons specified in control_map."""
 
-
+    mageck_pairs_done = [] #todo remove this, or do something with it
     call("which mageck".split())
     pipeLOG.info('Running MAGeCK version ' + check_output(["mageck", "-v"]).decode())
 
@@ -212,19 +216,20 @@ def run_mageck_batch(sample_reps:Dict[str, list],
         for treat in treat_samples:
             if treat == ctrl_samp:
                 continue
-            ctrls = ','.join(sample_reps[ctrl_samp])
-            treats = ','.join(sample_reps[treat])
-            # ctrls = ','.join(sample_reps[_ctrl_samp])
-            # treats = ','.join(sample_reps[_treat])
-            _run_mageck(ctrls, treats, count_fn)
+
+            call_mageck(ctrl_samp, treat, sample_reps, count_fn, prefix, mag_kwargs)
             mageck_pairs_done.append((ctrl_samp, treat))
         if not skip_extra_mageck:
             # run all combinations of samples that share at least one control sample
+            # replace the control group name in the string
+            pref_split = prefix.split('.')
+            pref_split[-2] = 'EXTRA'
+            prefix = '.'.join(pref_split)
             for c, t in combinations(treat_samples, 2):
                 if (c, t) not in mageck_pairs_done and (t, c) not in mageck_pairs_done:
                     mageck_pairs_done.append((c, t))
                     # maybe don't tablulate these at the moment.
-                    _run_mageck(c, t, prefix=mf_prefix.replace(ctrlgroup, 'EXTRA'))
+                    call_mageck(c, t, sample_reps, mag_kwargs)
 
 
 def run_analysis(fn_counts, outdir, file_prefix,
@@ -319,49 +324,49 @@ def run_analysis(fn_counts, outdir, file_prefix,
         #########
         # *run MAGECK
         if not charts_only and not skip_mageck:
-
-            mageck_pairs_done = []
-            def _run_mageck(_ctrl_samp, _treat, prefix = mf_prefix):
-                mageck_str = "mageck test -k {counts} -t {treat} -c {ctrl} -n {outprefix}{ctrlnm}-{sampnm}"
-                # get the replicate strings
-                ctrls = ','.join(sample_reps[_ctrl_samp])
-                treats = ','.join(sample_reps[_treat])
-                s = mageck_str.format(
-                    counts=fn_counts,
-                    treat=treats,
-                    ctrl=ctrls,
-                    outprefix=prefix,
-                    ctrlnm=_ctrl_samp,
-                    sampnm=_treat
-                )
-                mag_additional_args = []
-                if mageck_kwargs:
-                    mag_additional_args = [f"--{_k} {_v}" for _k, _v in mageck_kwargs.items()]
-                mag_args = s.split()+mag_additional_args
-                # for some reason mageck fails to understand mag_args if you don't use shell=True
-                pipeLOG.info(' '.join(mag_args))
-                call(' '.join(mag_args), shell=True)
-
-            call("which mageck".split())
-            pipeLOG.info('Running MAGeCK version '+check_output(["mageck","-v"]).decode())
-
-            for ctrl_samp, treat_samps in ctrlmap.items():
-                if type(treat_samps) is str:
-                    treat_samps = [treat_samps]
-                for treat in treat_samps:
-                    if treat == ctrl_samp:
-                        continue
-                    # ctrls = ','.join(sample_reps[_ctrl_samp])
-                    # treats = ','.join(sample_reps[_treat])
-                    _run_mageck(ctrl_samp, treat)
-                    mageck_pairs_done.append((ctrl_samp, treat))
-                if not skip_extra_mageck:
-                    # run all combinations of samples that share at least one control sample
-                    for c, t in combinations(treat_samps, 2):
-                        if (c,t) not in mageck_pairs_done and (t,c) not in mageck_pairs_done:
-                            mageck_pairs_done.append((c,t))
-                            # maybe don't tablulate these at the moment.
-                            _run_mageck(c, t, prefix=mf_prefix.replace(ctrlgroup, 'EXTRA'))
+            run_mageck_batch(sample_reps, controls[ctrlgroup], fn_counts, mf_prefix, mageck_kwargs, skip_extra_mageck)
+            # mageck_pairs_done = []
+            # def _run_mageck(_ctrl_samp, _treat, prefix = mf_prefix):
+            #     mageck_str = "mageck test -k {counts} -t {treat} -c {ctrl} -n {outprefix}{ctrlnm}-{sampnm}"
+            #     # get the replicate strings
+            #     ctrls = ','.join(sample_reps[_ctrl_samp])
+            #     treats = ','.join(sample_reps[_treat])
+            #     s = mageck_str.format(
+            #         counts=fn_counts,
+            #         treat=treats,
+            #         ctrl=ctrls,
+            #         outprefix=prefix,
+            #         ctrlnm=_ctrl_samp,
+            #         sampnm=_treat
+            #     )
+            #     mag_additional_args = []
+            #     if mageck_kwargs:
+            #         mag_additional_args = [f"--{_k} {_v}" for _k, _v in mageck_kwargs.items()]
+            #     mag_args = s.split()+mag_additional_args
+            #     # for some reason mageck fails to understand mag_args if you don't use shell=True
+            #     pipeLOG.info(' '.join(mag_args))
+            #     call(' '.join(mag_args), shell=True)
+            #
+            # call("which mageck".split())
+            # pipeLOG.info('Running MAGeCK version '+check_output(["mageck","-v"]).decode())
+            #
+            # for ctrl_samp, treat_samps in ctrlmap.items():
+            #     if type(treat_samps) is str:
+            #         treat_samps = [treat_samps]
+            #     for treat in treat_samps:
+            #         if treat == ctrl_samp:
+            #             continue
+            #         # ctrls = ','.join(sample_reps[_ctrl_samp])
+            #         # treats = ','.join(sample_reps[_treat])
+            #         _run_mageck(ctrl_samp, treat)
+            #         mageck_pairs_done.append((ctrl_samp, treat))
+            #     if not skip_extra_mageck:
+            #         # run all combinations of samples that share at least one control sample
+            #         for c, t in combinations(treat_samps, 2):
+            #             if (c,t) not in mageck_pairs_done and (t,c) not in mageck_pairs_done:
+            #                 mageck_pairs_done.append((c,t))
+            #                 # maybe don't tablulate these at the moment.
+            #                 _run_mageck(c, t, prefix=mf_prefix.replace(ctrlgroup, 'EXTRA'))
 
 
         if not charts_only and not skip_drugz:
@@ -370,6 +375,7 @@ def run_analysis(fn_counts, outdir, file_prefix,
 
         ############
         #* Get tables
+        #todo probably have a dict of tables that is populated as we go. And probably just use snakemake
         analyses_used = []
         if not skip_jacks:
             scoresmode = tabulate_score(jmode_prefix)

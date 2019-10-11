@@ -46,6 +46,7 @@ __version__ = '1.4.1'
 
 #todo just ouput a single file
 #todo use logging instead of stealing print
+#todo more information about matches per file, per sample mapping stats
 
 
 def count_reads(fn, slicer=(None, None), s_len=None, s_offset=0, ):
@@ -109,6 +110,7 @@ def fuzzy_match(query_seq, lib_seqs, max_dist=3):
     else:
         # explicitly...
         return None
+
 
 def get_file_list(files_dir) -> List[os.PathLike]:
     """Pass single string or list of stings, strings that are files go on the

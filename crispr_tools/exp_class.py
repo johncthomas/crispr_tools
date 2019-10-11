@@ -14,7 +14,7 @@ class CrisprExperiment:
     def __init__(self,
                  count: Union[str, pd.DataFrame],
                  expd: Union[str, dict],
-                 lib: Union[str, dict],
+                 lib: Union[str, pd.DataFrame],
                  rep_deets: pd.DataFrame = None,
                  samp_deets: pd.DataFrame = None):
 
@@ -22,6 +22,7 @@ class CrisprExperiment:
 
         if isStr(expd):
             expd = yaml.load(open(expd))
+
 
         if isStr(count):
             count = pd.read_csv(count, '\t', index_col=0)
