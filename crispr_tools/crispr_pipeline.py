@@ -173,9 +173,58 @@ def run_drugZ(fn_counts, outdir, file_prefix,
     pipeLOG.info('Finished drugZ')
 
 
-def run_analysis_ver2():
-    #
-    pass
+def _run_mageck(ctrls:str, treats:str, count:str, prefix:str):
+    mageck_str = "mageck test -k {counts} -t {treat} -c {ctrl} -n {outprefix}{ctrlnm}-{sampnm}"
+    # get the replicate strings
+
+    s = mageck_str.format(
+        counts=fn_counts,
+        treat=treats,
+        ctrl=ctrls,
+        outprefix=prefix,
+        ctrlnm=_ctrl_samp,
+        sampnm=_treat
+    )
+    mag_additional_args = []
+    if mageck_kwargs:
+        mag_additional_args = [f"--{_k} {_v}" for _k, _v in mageck_kwargs.items()]
+    mag_args = s.split() + mag_additional_args
+    # for some reason mageck fails to understand mag_args if you don't use shell=True
+    pipeLOG.info(' '.join(mag_args))
+    call(' '.join(mag_args), shell=True)
+
+def run_mageck_batch(sample_reps:Dict[str, list],
+                     control_map:Dict[str, list],
+                     count_fn:str,
+                     ):
+    mageck_pairs_done = []
+
+
+
+    call("which mageck".split())
+    pipeLOG.info('Running MAGeCK version ' + check_output(["mageck", "-v"]).decode())
+
+    for ctrl_samp, treat_samples in control_map.items():
+
+        if type(treat_samples) is str:
+            treat_samples = [treat_samples]
+
+        for treat in treat_samples:
+            if treat == ctrl_samp:
+                continue
+            ctrls = ','.join(sample_reps[ctrl_samp])
+            treats = ','.join(sample_reps[treat])
+            # ctrls = ','.join(sample_reps[_ctrl_samp])
+            # treats = ','.join(sample_reps[_treat])
+            _run_mageck(ctrls, treats, count_fn)
+            mageck_pairs_done.append((ctrl_samp, treat))
+        if not skip_extra_mageck:
+            # run all combinations of samples that share at least one control sample
+            for c, t in combinations(treat_samples, 2):
+                if (c, t) not in mageck_pairs_done and (t, c) not in mageck_pairs_done:
+                    mageck_pairs_done.append((c, t))
+                    # maybe don't tablulate these at the moment.
+                    _run_mageck(c, t, prefix=mf_prefix.replace(ctrlgroup, 'EXTRA'))
 
 
 def run_analysis(fn_counts, outdir, file_prefix,
