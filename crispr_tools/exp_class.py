@@ -5,13 +5,14 @@ from typing import Union, List, Dict
 import yaml
 from crispr_tools import *
 from attrdict import AttrDict
-
+import os
 from crispr_tools.crispr_pipeline import process_control_map
 from crispr_tools.qc import get_clonal_lfcs
 from copy import copy
-
+import pathlib
 class CrisprExperiment:
     def __init__(self,
+                 root_dir: os.PathLike,
                  count: Union[str, pd.DataFrame],
                  expd: Union[str, dict],
                  lib: Union[str, pd.DataFrame],
@@ -20,9 +21,10 @@ class CrisprExperiment:
 
         isStr = lambda x: type(x) is str
 
+        self.root_dir = root_dir
+
         if isStr(expd):
             expd = yaml.load(open(expd))
-
 
         if isStr(count):
             count = pd.read_csv(count, '\t', index_col=0)
@@ -48,7 +50,7 @@ class CrisprExperiment:
 
         self.clonal_lfc = AttrDict()
         for grp in self.controls:
-            get_clonal_lfcs(
+            self.clonal_lfc[grp] = get_clonal_lfcs(
                 self.lncount,
                 self.controls[grp],
                 self.sample_replicates
@@ -75,6 +77,23 @@ class CrisprExperiment:
         for grp in self.controls.keys():
             res[grp] = tabulate_score(f"{prefix}.{grp}.")
         self.results['jacks'] = res
+
+    def add_results(self, expd=None):
+        """Add analysis results from mageck or jacks, using info specified in
+        expd."""
+        if expd is None:
+            expd = self.expd
+        # todo will need fixing when job spec in expd is improved
+        p = os.path.join(self.root_dir, expd['exp_name'], expd['analysis_name'])
+
+        if 'skip_mageck' not in expd or not expd['skip_mageck']:
+            prefix = os.path.join(p, 'mageck', 'files', f"{expd['file_prefix']}")
+            self.add_mageck(prefix)
+
+        if 'skip_jacks' not in expd or not expd['skip_jacks']:
+            prefix = os.path.join(p, 'jacks_median', 'files', f"{expd['file_prefix']}")
+            self.add_jacks(prefix)
+
 
 #     # since clonal lfc is fairly expensive to calculate, lets leave it till we need it
 #     @property

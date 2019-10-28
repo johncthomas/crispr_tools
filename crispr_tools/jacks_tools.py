@@ -374,28 +374,37 @@ def mahal_nocov(xs, xs_sd, ys, ys_sd, line_ig = (0,1), **cp_kwargs):
     return euc_dist, ps, pd.Series(mahal_dist)
 
 
-def get_jacks_stats(df, sampx, sampy):
+def get_jacks_stats(df, sampx, sampy, negative_sig=True):
     # duplicated from crispr_screen_viewer.scatter
-    """returns ps, fdr and size of difference between X and Y distributions.
-    Negative values for those below the line. Is log10.
+    """returns DF of  p-value, FDR, Difference, calculated between X
+    and Y distributions. Significance values are -log10
 
-    a dataframe with columns:
-        'p-value', 'FDR', 'Difference'
+    Args:
+        df: a multiindex DF, levels[0] are sample names, levels[1] including
+            jacks_score and stdev.
+        sampx: name of column giving the stats of the sample to be plotted on x
+        sampy: as above
+        negative_sig: if True negative values returned for genes with neg diff
+
+    Returns:
+        a dataframe with columns: 'p-value', 'FDR', 'Difference'
         """
     # if you add more, update STAT_KEYS
     X = df[sampx]
     Y = df[sampy]
     # We can assume the subcol names i guess
-    diff = abs(X.jacks_score - Y.jacks_score)
+    # todo make it return non-absolute diff and non-negative sig values by default, and update the charts
+    diff = abs(Y.jacks_score - X.jacks_score)
     sumstd = np.sqrt(X.stdev**2 + Y.stdev**2)
     # get bool array, index will be
     negative = (Y.jacks_score < X.jacks_score).values
     # cdf value at zero
-    ps = stats.norm(diff, sumstd).cdf(0)
+    ps = stats.norm(diff.abs(), sumstd).cdf(0)
     fdr = sm.stats.multipletests(ps, 0.1, 'fdr_bh')[1]
     ps, fdr = [-np.log10(s) for s in (ps, fdr)]
-    ps[negative] = 0-ps[negative]
-    fdr[negative] = 0-fdr[negative]
+    if negative_sig:
+        ps[negative] = 0-ps[negative]
+        fdr[negative] = 0-fdr[negative]
 
     DISTANCES = {
         'p-value': ps,

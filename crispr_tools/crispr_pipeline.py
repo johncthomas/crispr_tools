@@ -224,12 +224,15 @@ def run_mageck_batch(sample_reps:Dict[str, list],
             # replace the control group name in the string
             pref_split = prefix.split('.')
             pref_split[-2] = 'EXTRA'
-            prefix = '.'.join(pref_split)
+            prefix_extra = '.'.join(pref_split)
             for c, t in combinations(treat_samples, 2):
                 if (c, t) not in mageck_pairs_done and (t, c) not in mageck_pairs_done:
                     mageck_pairs_done.append((c, t))
                     # maybe don't tablulate these at the moment.
-                    call_mageck(c, t, sample_reps, mag_kwargs)
+                    call_mageck(c, t, sample_reps, count_fn, prefix_extra, mag_kwargs)
+
+def validate_expd(expd:dict):
+    pass
 
 
 def run_analysis(fn_counts, outdir, file_prefix,
@@ -575,10 +578,11 @@ def process_arguments(arguments:dict):
     controls = process_control_map(arguments['controls'], samples)
     arguments['controls'] = controls
 
+
     # in case strings are passed instead of lists
     if 'comparisons' in arguments:
         for comp in arguments['comparisons']:
-            print(arguments['comparisons'])
+            #print(arguments['comparisons'])
             for k, v in comp.items():
                 if type(v) == str:
                     comp[k] = [v]
@@ -592,6 +596,9 @@ def process_arguments(arguments:dict):
         line = next(f)
         if not '\t' in line:
             raise ValueError('No tabs in file, is it comma seperated?\n\t'+line)
+
+    if not 'labels' in arguments or not arguments['labels']:
+        arguments['labels'] = {s:s for s in samples}
 
     return arguments
 

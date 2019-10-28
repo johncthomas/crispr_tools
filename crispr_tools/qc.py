@@ -12,11 +12,14 @@ from crispr_tools.tools import list_not_str
 
 #todo test plot_clonal_X
 #todo clonal lfcs should be multi-indexed for other uses
-# like selecting control reps that match condition x and treat reps that match y
+#  like selecting control reps that match condition x and treat reps that match y
+#todo qc plots should include intial abundance vs lfc dispersion, as obtained from clonal
 def get_clonal_lfcs(lncounts, ctrl_dict:dict, sample_reps:dict, lognorm=False):
     """get a DF of clonal LFCs using the ctrl/sample pairs specified by ctrl_dict.
     Assumes that clones are grouped by order of appearance in sample_reps"""
     _lfcs = {}
+
+    genes = lncounts.gene
 
     if lognorm:
         lncounts = size_factor_normalise(lncounts)
@@ -28,6 +31,9 @@ def get_clonal_lfcs(lncounts, ctrl_dict:dict, sample_reps:dict, lognorm=False):
             treat_clone_pairs = zip(sample_reps[ctrl_samp], sample_reps[trt_samp])
             for c, t in treat_clone_pairs:
                 _lfcs[c+'-'+t] = lncounts[t] - lncounts[c]
+
+
+
     return pd.DataFrame(_lfcs)
 
 
