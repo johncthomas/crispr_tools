@@ -3,6 +3,7 @@ from .tools import size_factor_normalise, plot_read_violins, plot_ROC, plot_volc
     tabulate_mageck, pca_grid
 from .jacks_tools import tabulate_score, tabulate_jacks, scores_scatterplot
 from .version import __version__
+from .hart_list import hart_list
 # import pathlib
 # with open(pathlib.Path(__file__).parent/'version.txt') as f:
 #     __version__ = f.readline().replace('\n', '')

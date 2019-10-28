@@ -19,7 +19,7 @@ import pandas as pd
 #    hart_list = pd.Series(hart_list, index=hart_list)
 #else:
 #    print('Hart list not found')
-from hart_list import hart_list
+from crispr_tools import hart_list
 
 __version__ = 'v1.4.0'
 
