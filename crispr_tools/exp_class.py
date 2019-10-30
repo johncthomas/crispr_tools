@@ -28,6 +28,7 @@ class CrisprExperiment:
 
         if isStr(count):
             count = pd.read_csv(count, '\t', index_col=0)
+
         self.count = count
         self.countng = count.drop('gene', 1)
 
@@ -94,6 +95,10 @@ class CrisprExperiment:
             prefix = os.path.join(p, 'jacks_median', 'files', f"{expd['file_prefix']}")
             self.add_jacks(prefix)
 
+def load_exp_from_expd(expd: Union[str, bytes, os.PathLike, Dict, AttrDict]):
+    if type(expd) is (str, bytes, os.PathLike):
+        with open(expd) as f:
+            expd =
 
 #     # since clonal lfc is fairly expensive to calculate, lets leave it till we need it
 #     @property
