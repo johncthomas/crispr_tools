@@ -3,6 +3,7 @@ from setuptools import setup, find_packages
 # import os
 
 #todo remove shapely requirement from mahal calc
+#todo sort out drugz, make it part of this repository.
 
 with open('./crispr_tools/version.py') as f:
     v = f.readline()
