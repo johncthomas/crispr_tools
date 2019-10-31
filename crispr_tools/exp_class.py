@@ -95,10 +95,12 @@ class CrisprExperiment:
             prefix = os.path.join(p, 'jacks_median', 'files', f"{expd['file_prefix']}")
             self.add_jacks(prefix)
 
-def load_exp_from_expd(expd: Union[str, bytes, os.PathLike, Dict, AttrDict]):
-    if type(expd) is (str, bytes, os.PathLike):
-        with open(expd) as f:
-            expd =
+# def load_exp_from_expd(expd: Union[str, bytes, os.PathLike, Dict, AttrDict], root_dir='./'):
+#     if type(expd) is (str, bytes, os.PathLike):
+#         with open(expd) as f:
+#             expd = yaml.safe_load(f)
+#         exp = CrisprExperiment(root_dir,
+#                                expd['counts_fn'], )
 
 #     # since clonal lfc is fairly expensive to calculate, lets leave it till we need it
 #     @property
