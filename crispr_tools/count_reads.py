@@ -192,7 +192,8 @@ def count_batch(fn_or_dir, slicer, fn_prefix='', seq_len=None, seq_offset=0, fn_
 
     t = os.path.split(fn_prefix)[0]
     t = os.path.expanduser(t)
-    assert os.path.isdir(t)
+    if t:
+        assert os.path.isdir(t)
 
     # accepts list of mixed files and dir, ends up as list of files
     file_list = get_file_list(fn_or_dir)
