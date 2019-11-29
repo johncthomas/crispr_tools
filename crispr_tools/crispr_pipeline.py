@@ -175,6 +175,18 @@ def run_drugZ(fn_counts, outdir, file_prefix,
 
 def call_mageck(control_samp:str, treat_samp:str, sample_reps:Dict[str, List[str]],
                 fn_counts:str, prefix:str, kwargs:dict):
+    """Call mageck from the command line:
+        "mageck test -k {counts} -t {treat} -c {ctrl} -n {outprefix}{ctrlnm}-{sampnm}"
+
+    Args:
+        control_samp: Name of control sample as written in sample_reps.
+        treat_samp:   as above, but for treatment.
+        sample_reps: Dict giving mapping of sample to replicates, replicate names match
+            column headers in counts file.
+        prefix: Prefix added to all created files, should include desired output dir.
+        kwargs: Keyword arguments to be passed on to mageck.
+
+    """
     mageck_str = "mageck test -k {counts} -t {treat} -c {ctrl} -n {outprefix}{ctrlnm}-{sampnm}"
     # get the replicate strings
     ctrls = ','.join(sample_reps[control_samp])
@@ -204,7 +216,7 @@ def run_mageck_batch(sample_reps:Dict[str, list],
 
     """Run mageck analyses using comparisons specified in control_map."""
 
-    mageck_pairs_done = [] #todo remove this, or do something with it
+    mageck_pairs_done = [] # used to avoid repeating comps in EXTRA
     call("which mageck".split())
     pipeLOG.info('Running MAGeCK version ' + check_output(["mageck", "-v"]).decode())
 
@@ -219,6 +231,7 @@ def run_mageck_batch(sample_reps:Dict[str, list],
 
             call_mageck(ctrl_samp, treat, sample_reps, count_fn, prefix, mag_kwargs)
             mageck_pairs_done.append((ctrl_samp, treat))
+        # EXTRA
         if not skip_extra_mageck:
             # run all combinations of samples that share at least one control sample
             # replace the control group name in the string

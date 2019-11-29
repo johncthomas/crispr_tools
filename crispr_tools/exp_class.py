@@ -12,15 +12,18 @@ from copy import copy
 import pathlib
 class CrisprExperiment:
     def __init__(self,
-                 root_dir: os.PathLike,
+
                  count: Union[str, pd.DataFrame],
                  expd: Union[str, dict],
                  lib: Union[str, pd.DataFrame],
                  rep_deets: pd.DataFrame = None,
-                 samp_deets: pd.DataFrame = None):
+                 samp_deets: pd.DataFrame = None,
+                 root_dir: os.PathLike = None):
 
         isStr = lambda x: type(x) is str
 
+        if root_dir is None:
+            root_dir = os.getcwd()
         self.root_dir = root_dir
 
         if isStr(expd):
