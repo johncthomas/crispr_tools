@@ -47,6 +47,8 @@ __version__ = '1.4.1'
 #todo just ouput a single file
 #todo use logging instead of stealing print
 #todo more information about matches per file, per sample mapping stats
+#todo unmerged counts with identical filenames overwrite each other currently in the
+#todo check library seq len and file seq len match.
 
 
 def count_reads(fn, slicer=(None, None), s_len=None, s_offset=0, ):
@@ -419,7 +421,7 @@ if __name__ == '__main__':
                         required=True)
     parser.add_argument('-f', default='.rawcount', metavar='FN_SUFFIX',
                         help="Suffix added to output files, .txt will always be added after. Default `.rawcount`")
-    parser.add_argument('-p', default='', metavar='FN_PREFIX',
+    parser.add_argument('-p',  metavar='FN_PREFIX',
                         help="Prefix added to output files, can include absolute or relative paths.")
     parser.add_argument('--fn-split', default='_R1_', metavar='STR',
                         help="String used to split filenames and form output file prefix. Default `_R1_`." \
