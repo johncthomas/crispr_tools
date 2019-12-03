@@ -326,6 +326,8 @@ def tabulate_mageck(prefix):
         # keep the pos and neg p values with better names
         tab.loc[:, 'neg_p'] = mtab['neg|p-value']
         tab.loc[:, 'pos_p'] = mtab['pos|p-value']
+        tab.loc[:, 'neg_fdr'] = mtab['neg|fdr']
+        tab.loc[:, 'pos_fdr'] = mtab['pos|fdr']
 
         tab.loc[:, 'lfc'] = mtab.loc[:, 'neg|lfc']
         # turn sep pos|neg columns into one giving only the appropriate LFC/FDR
@@ -343,7 +345,8 @@ def tabulate_mageck(prefix):
 
     # create multiindex using the sample names and stats
     tbcolumns = pd.MultiIndex.from_product(
-        [sorted(tables.keys()), ['lfc', 'fdr', 'fdr_log10', 'p', 'p_log10', 'pos_p', 'neg_p']],
+        [sorted(tables.keys()), ['lfc', 'fdr', 'fdr_log10', 'p', 'p_log10', 'pos_p', 'neg_p',
+                                 'neg_fdr', 'pos_fdr']],
         1
     )
     table = pd.DataFrame(index=tab.index, columns=tbcolumns)
