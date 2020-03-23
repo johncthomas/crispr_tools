@@ -111,6 +111,7 @@ hart_list = ['AARS1', 'ABCE1', 'ABCF1', 'ACTB', 'ACTL6A', 'ACTR10', 'ACTR2',
        'WDR70', 'WDR74', 'WDR75', 'WDR77', 'WDR92', 'WEE1', 'XAB2',
        'XPO1', 'XRCC6', 'YARS1', 'YARS2', 'YRDC', 'ZBTB8OS', 'ZMAT5',
        'ZNF131', 'ZPR1', 'ZNF574']
+
 hart_list = pd.Series(hart_list, index=hart_list)
 
 __version__ = 'v1.4.0'
@@ -507,3 +508,24 @@ def write_repmap(sample_reps:Dict[str, list], ctrlmap:Dict[str, list], repmap_fn
     with open(repmap_fn, 'w') as f:
         for line in reptab:
             f.write('\t'.join(line) + '\n')
+
+
+def get_req_infection(libcnt, minimum=100, quantile = 0.05):
+    libcnt = libcnt.sort_values().copy()
+    x = libcnt.quantile(quantile)
+    if x == 0:
+        return np.inf
+    return sum(libcnt)/(x/minimum)
+
+def plot_req_inf(counts, reps, qrange=(0.01,0.1), moi=0.2):
+    plt.figure(figsize=(6, 10))
+    for n in reps:
+        ys=[]
+        xs = np.linspace(*qrange, 100)
+        for quantile in xs:
+            ys.append(get_req_infection(counts, n, quantile = quantile))
+        ys=pd.Series(ys)
+        plt.plot((1-xs)*100, ys/moi, label=str(n))
+        plt.xlabel("% guides > X ")
+        plt.ylabel("required cell infections")
+    plt.legend(title='X (guide rep)')

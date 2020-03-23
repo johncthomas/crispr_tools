@@ -87,7 +87,7 @@ def int2az(x):
 
 def iter_reps(nreps, fractions):
     """get the product of reps and fractions, yield strings of
-    fractions, letters for each rep and frac+rep"""
+    fractions, letters and str(frac)+letter for each rep"""
     for _rep in range(nreps):
 
         _letter = int2az(_rep)
@@ -184,6 +184,65 @@ def resample_run_jacks(count_tab:Union[pd.DataFrame, Dict[str, pd.DataFrame]],
     else:
         return None
 
+def resample_run_analysis(count_tab:Union[None,pd.DataFrame, Dict[str, pd.DataFrame]],
+                       analysis_type:str,
+                       sample_reps:Dict[str,List[str]],
+                       ctrl_samp:str,
+                        treat_samps:Union[str,list],
+                       fractions:List[float],
+                       nreps:int,
+                       working_dir:Union[str, os.PathLike],
+                       tabulate=True,
+                       processors:int=None,
+                       do_resample=True,
+                       analysis_kwargs=None):
+    """Run a resampling experiment. If do_resample is True, the count_tab is
+    resampled, to size given in fractions, nreps times per fraction. If
+    do_resample is False, a dictionary of already resampled counts should be
+    supplied as count_tab.
+
+    Returns dict of dict of DF prodcued by tabulate_score, keyed first by
+    fraction and then rep letter."""
+
+    from crispr_tools.crispr_pipeline import call_mageck_batch, call_jacks, list_not_str
+    from functools import partial
+    analysis_type = analysis_type.lower()
+    run_analysis, tabulate_func = {
+        'jacks':(call_jacks, partial(tabulate_score,return_ps=True) ),
+        'mageck':(call_mageck_batch, tabulate_mageck)
+    }[analysis_type]
+
+    assert os.path.isdir(working_dir)
+
+    if do_resample:
+        resamped_tabs = get_resampled_tabs(count_tab, fractions, nreps, processors)
+    else:
+        resamped_tabs = count_tab
+
+    # the output
+    analysis_tables = {f:{} for f in fractions}
+
+    for frac, letter, k in iter_reps(nreps, fractions):
+        tabpath = f"{working_dir}/count_{k}.tsv"
+
+        if resamped_tabs:
+            count_tab = resamped_tabs[frac][letter]
+            count_tab.to_csv(tabpath, '\t')
+
+        respath = f"{working_dir}/{analysis_type}_{k}"
+
+        # todo put list_not_str and others in a toolbox
+
+        treat_samps = list_not_str(treat_samps)
+        run_analysis(sample_reps, {ctrl_samp:treat_samps}, tabpath, respath, analysis_kwargs)
+        if tabulate:
+            analysis_tables[frac][letter] = tabulate_func(respath)
+
+    if tabulate:
+        return analysis_tables
+    else:
+        return None
+
 
 def resample_calc_lfc(count_tab:pd.DataFrame,
                    ctrl_map:Union[str, List[str]],
@@ -276,4 +335,30 @@ def test_resampling():
     plt.show()
 
 if __name__ == '__main__':
-    test_resampling()
+    from crispr_tools.jupyter_imports import *
+    #test_resampling()
+    os.chdir('/Users/johnc.thomas/Dropbox/crispr/p53_etc')
+    xd = '/Users/johnc.thomas/Dropbox/crispr/screens_analysis/david_756+ddrV2'
+
+    repdeets = pd.read_excel(xd + '/dav_756+.xlsx', sheet_name='Replicate details', index_col='Replicate')
+    sampdeets = pd.read_excel(xd + '/dav_756+.xlsx', sheet_name='Sample details', index_col=0)
+
+    with working_dir('/Users/johnc.thomas/Dropbox/crispr/'):
+
+        dav = CrisprExperiment(
+            'counts_all/dav_756-73.counts.tsv',
+            'screens_analysis/david_756+ddrV2/dav756-73.yaml',
+            'crispr_libraries/transomics_ddr_v2-1.csv',
+            repdeets, sampdeets
+        )
+
+        ad = '/Users/johnc.thomas/Dropbox/crispr/screens_analysis/david_756+ddrV2/dav_756-73/take2_libV2_2'
+        dav.add_mageck(ad + '/mageck/files/dav_756-73')
+        # dav.add_jacks(ad+'/jacks_median/files/dav_756-73')
+    for ctrl, treat in ('wt_d3', 'wt_d19'), ('ko1_d3', 'ko1_d19'):
+        fractions = (0.01,)  # 0.2, 0.3, 0.4, 0.5, 0.75, 1)
+        reps = 2
+        resamped_tabs = resample_run_analysis(dav.count, 'mageck', dav.sample_replicates, ctrl, treat, fractions, reps,
+                                              working_dir='resampling', processors=6)
+
+    print(resamped_tabs.head())

@@ -33,6 +33,10 @@ from crispr_tools.tools import list_not_str
 # with open(pathlib.Path(__file__).parent/'version.txt') as f:
 #     __version__ = f.readline().replace('\n', '')
 
+class ConfigurationError(Exception):
+    """Errors in the configuration file that would prevent the pipeline from running"""
+    pass
+
 pipeLOG = logging.getLogger('pipeline')
 pipeLOG.setLevel(logging.INFO)
 
@@ -54,6 +58,7 @@ from crispr_tools.version import __version__
 #todo QC by default!!
 #todo save yaml in output dir
 #todo handle different analyses better, making it easy to add new ones and turn of during analysis
+    # in particular there should be functions for each that take the exact same arguments.
 
 
 """Go from FastQ files to completed JACKS/MAGeCK analysis. 
@@ -78,14 +83,30 @@ class StreamToLogger(object):
          self.logger.log(self.log_level, line.rstrip())
 
 
-def call_JACKS(fn_counts, fn_repmap, outprefix, norm='mode'):
-    # it'll probably be easiest to just write a temp repmap tsv from the xlsx
-    xl = pd.ExcelFile(fn_repmap)
-    for ctrlgroup in xl.sheet_names:
-        repmap = xl.parse(ctrlgroup)
-        repmap.to_csv('tmp.repmap.tsv', '\t')
-        runJACKS(fn_counts, 'tmp.repmap.tsv', fn_counts, 'rep', 'samp', None, 'ctrl', 'guide', 'gene',
-                 norm_type=norm, outprefix=outprefix+'.'+ctrlgroup+'.')
+# def call_JACKS(fn_counts, fn_repmap, outprefix, norm='mode', kwargs:dict=None):
+#     if kwargs is None:
+#         kwargs={}
+#
+#     # it'll probably be easiest to just write a temp repmap tsv from the xlsx
+#     xl = pd.ExcelFile(fn_repmap)
+#     for ctrlgroup in xl.sheet_names:
+#         repmap = xl.parse(ctrlgroup)
+#         repmap.to_csv('tmp.repmap.tsv', '\t')
+#         runJACKS(fn_counts, 'tmp.repmap.tsv', fn_counts, 'rep', 'samp', None, 'ctrl', 'guide', 'gene',
+#                  norm_type=norm, outprefix=outprefix+'.'+ctrlgroup+'.', **kwargs)
+
+# make the jacks repmap: rep, samp, ctrl
+def call_jacks(sample_reps:Dict[str,List[str]], ctrlmap, count_fn, prefix, kwargs:Dict=None):
+    if kwargs is None:
+        kwargs={}
+    repmap_fn = prefix+'.repmap.tsv'
+    write_repmap(sample_reps, ctrlmap, repmap_fn)
+    #pipeLOG.info(f"Running JACKS, mode and median normalised with {repmap_fn}")
+
+    jacks_args = (count_fn, repmap_fn, count_fn, 'rep', 'samp', None, 'ctrl', 'guide', 'gene',)
+
+    runJACKS(*jacks_args, outprefix=prefix, **kwargs)
+
 
 def set_logger(log_fn):
 
@@ -174,7 +195,7 @@ def run_drugZ(fn_counts, outdir, file_prefix,
 
 
 def call_mageck(control_samp:str, treat_samp:str, sample_reps:Dict[str, List[str]],
-                fn_counts:str, prefix:str, kwargs:dict):
+                fn_counts:str, prefix:str, kwargs:dict, logger=None):
     """Call mageck from the command line:
         "mageck test -k {counts} -t {treat} -c {ctrl} -n {outprefix}{ctrlnm}-{sampnm}"
 
@@ -204,15 +225,18 @@ def call_mageck(control_samp:str, treat_samp:str, sample_reps:Dict[str, List[str
         mag_additional_args = [f"--{_k} {_v}" for _k, _v in kwargs.items()]
     mag_args = s.split() + mag_additional_args
     # for some reason mageck fails to understand mag_args if you don't use shell=True
-    pipeLOG.info(' '.join(mag_args))
+    if logger:
+        logger.info(' '.join(mag_args))
     call(' '.join(mag_args), shell=True)
 
-def run_mageck_batch(sample_reps:Dict[str, list],
-                     control_map:Dict[str, list],
-                     count_fn:str,
-                     prefix:str,
-                     mag_kwargs:dict=None,
-                     skip_extra_mageck=True):
+# CALL SIGNATURE MUST MATCH CALL JACKS and any others
+#todo one function/class as wrapper for all analysis methods
+def call_mageck_batch(sample_reps:Dict[str, list],
+                      control_map:Dict[str, list],
+                      count_fn:str,
+                      prefix:str,
+                      kwargs:dict=None,
+                      skip_extra_mageck=True):
 
     """Run mageck analyses using comparisons specified in control_map."""
 
@@ -229,7 +253,7 @@ def run_mageck_batch(sample_reps:Dict[str, list],
             if treat == ctrl_samp:
                 continue
 
-            call_mageck(ctrl_samp, treat, sample_reps, count_fn, prefix, mag_kwargs)
+            call_mageck(ctrl_samp, treat, sample_reps, count_fn, prefix, kwargs)
             mageck_pairs_done.append((ctrl_samp, treat))
         # EXTRA
         if not skip_extra_mageck:
@@ -242,7 +266,7 @@ def run_mageck_batch(sample_reps:Dict[str, list],
                 if (c, t) not in mageck_pairs_done and (t, c) not in mageck_pairs_done:
                     mageck_pairs_done.append((c, t))
                     # maybe don't tablulate these at the moment.
-                    call_mageck(c, t, sample_reps, count_fn, prefix_extra, mag_kwargs)
+                    call_mageck(c, t, sample_reps, count_fn, prefix_extra, kwargs)
 
 def validate_expd(expd:dict):
     pass
@@ -281,7 +305,7 @@ def run_analysis(fn_counts, outdir, file_prefix,
         jacks_kwargs['ctrl_genes'] = ctrl_genes
         #todo write a temp file for mageck, and clean up all temp files (put paths in a list)
 
-    for analysis_str in ('jacks_mode', 'jacks_median', 'mageck'):
+    for analysis_str in ('jacks', 'mageck'):
         call(['mkdir', '-p', str(Path(outdir, analysis_str))])
         call(['mkdir', str(Path(outdir, analysis_str, 'volcano'))])
         call(['mkdir', str(Path(outdir, analysis_str, 'scatter'))])
@@ -311,79 +335,20 @@ def run_analysis(fn_counts, outdir, file_prefix,
         # File name prefixes
         fnprefix = file_prefix + '.' + ctrlgroup + '.'
         pipeLOG.info(f'\nRunning {ctrlgroup}, writing to {fnprefix}')
-        jmode_prefix = str(Path(outdir, 'jacks_mode', 'files', fnprefix))
-        jmed_prefix = str(Path(outdir, 'jacks_median', 'files', fnprefix))
+        #jmode_prefix = str(Path(outdir, 'jacks_mode', 'files', fnprefix))
+        jacks_prefix = str(Path(outdir, 'jacks', 'files', fnprefix))
         mf_prefix = str(Path(outdir, 'mageck', 'files', fnprefix))
 
         #################
         # Run JACKS
         if not charts_only and not skip_jacks:
-            # make the jacks repmap: rep, samp, ctrl
-            repmap_fn = outdir + ctrlgroup + '.repmap.tsv'
-            write_repmap(sample_reps, ctrlmap, repmap_fn)
-            pipeLOG.info(f"Running JACKS, mode and median normalised with {repmap_fn}")
-            if jacks_eff_fn:
-                jacks_eff = jacks_eff_fn.format(ctrlgroup)
-                if os.path.isfile(jacks_eff):
-                    pipeLOG.info(f'\tUsing {jacks_eff} for efficacy')
-                else:
-                    pipeLOG.info(f"\tcould not find {jacks_eff}")
-                    raise FileNotFoundError
-            else:
-                jacks_eff = None
 
-            jacks_args = (fn_counts, repmap_fn, fn_counts, 'rep', 'samp', None, 'ctrl', 'guide', 'gene',)
-
-            runJACKS(*jacks_args, norm_type='mode', outprefix=jmode_prefix, reffile=jacks_eff, **jacks_kwargs)
-            runJACKS(*jacks_args, norm_type='median', outprefix=jmed_prefix, reffile=jacks_eff, **jacks_kwargs)
+            call_jacks(sample_reps, ctrlmap, fn_counts, jacks_prefix, jacks_kwargs)
 
         #########
         # *run MAGECK
         if not charts_only and not skip_mageck:
-            run_mageck_batch(sample_reps, controls[ctrlgroup], fn_counts, mf_prefix, mageck_kwargs, skip_extra_mageck)
-            # mageck_pairs_done = []
-            # def _run_mageck(_ctrl_samp, _treat, prefix = mf_prefix):
-            #     mageck_str = "mageck test -k {counts} -t {treat} -c {ctrl} -n {outprefix}{ctrlnm}-{sampnm}"
-            #     # get the replicate strings
-            #     ctrls = ','.join(sample_reps[_ctrl_samp])
-            #     treats = ','.join(sample_reps[_treat])
-            #     s = mageck_str.format(
-            #         counts=fn_counts,
-            #         treat=treats,
-            #         ctrl=ctrls,
-            #         outprefix=prefix,
-            #         ctrlnm=_ctrl_samp,
-            #         sampnm=_treat
-            #     )
-            #     mag_additional_args = []
-            #     if mageck_kwargs:
-            #         mag_additional_args = [f"--{_k} {_v}" for _k, _v in mageck_kwargs.items()]
-            #     mag_args = s.split()+mag_additional_args
-            #     # for some reason mageck fails to understand mag_args if you don't use shell=True
-            #     pipeLOG.info(' '.join(mag_args))
-            #     call(' '.join(mag_args), shell=True)
-            #
-            # call("which mageck".split())
-            # pipeLOG.info('Running MAGeCK version '+check_output(["mageck","-v"]).decode())
-            #
-            # for ctrl_samp, treat_samps in ctrlmap.items():
-            #     if type(treat_samps) is str:
-            #         treat_samps = [treat_samps]
-            #     for treat in treat_samps:
-            #         if treat == ctrl_samp:
-            #             continue
-            #         # ctrls = ','.join(sample_reps[_ctrl_samp])
-            #         # treats = ','.join(sample_reps[_treat])
-            #         _run_mageck(ctrl_samp, treat)
-            #         mageck_pairs_done.append((ctrl_samp, treat))
-            #     if not skip_extra_mageck:
-            #         # run all combinations of samples that share at least one control sample
-            #         for c, t in combinations(treat_samps, 2):
-            #             if (c,t) not in mageck_pairs_done and (t,c) not in mageck_pairs_done:
-            #                 mageck_pairs_done.append((c,t))
-            #                 # maybe don't tablulate these at the moment.
-            #                 _run_mageck(c, t, prefix=mf_prefix.replace(ctrlgroup, 'EXTRA'))
-
+            call_mageck_batch(sample_reps, controls[ctrlgroup], fn_counts, mf_prefix, mageck_kwargs, skip_extra_mageck)
 
         if not charts_only and not skip_drugz:
             pipeLOG.info('Running DrugZ.')
@@ -394,17 +359,17 @@ def run_analysis(fn_counts, outdir, file_prefix,
         #todo probably have a dict of tables that is populated as we go. And probably just use snakemake
         analyses_used = []
         if not skip_jacks:
-            scoresmode = tabulate_score(jmode_prefix)
-            scoresmed = tabulate_score(jmed_prefix)
-            analyses_used.extend([('jacks_mode', 'jacks_score',  scoresmode),
-                                  ('jacks_median', 'jacks_score', scoresmed)])
+            #scoresmode = tabulate_score(jmode_prefix)
+            scores_jacks = tabulate_score(jacks_prefix)
+            analyses_used.extend([('jacks', 'jacks_score', scores_jacks)])
             if not charts_only:
                 pipeLOG.info('Writing JACKS tables')
-                modfn = str(Path(outdir, 'jacks_mode', 'tables', fnprefix+'jacks_scores.csv'))
-                medfn = str(Path(outdir, 'jacks_median', 'tables', fnprefix + 'jacks_scores.csv'))
-                pipeLOG.info('Writing: '+modfn+'\n\t& '+medfn)
-                scoresmode.to_csv(modfn)
-                scoresmed.to_csv(medfn)
+                #modfn = str(Path(outdir, 'jacks_mode', 'tables', fnprefix+'jacks_scores.csv'))
+                jacksfn = str(Path(outdir, 'jacks', 'tables', fnprefix + 'jacks_scores.csv'))
+                #medfn = str(Path(outdir, 'jacks_median', 'tables', fnprefix + 'jacks_scores.csv'))
+                pipeLOG.info('Writing: '+jacksfn)
+                #scoresmode.to_csv(modfn)
+                scores_jacks.to_csv(jacksfn)
 
         if not skip_mageck:
             scores_mageck = tabulate_mageck(mf_prefix)
@@ -436,15 +401,9 @@ def run_analysis(fn_counts, outdir, file_prefix,
                     )
                     plt.close()
 
-            # call(['tar', '-zcf',
-            #       str(Path(outdir, analysis_str+'volcano_charts.tar.gz')), #file to be created
-            #       # change to the target dir so it doesn't include the path in the tar
-            #       '-C', str(Path(outdir, analysis_str, 'volcano')), '.'])
-
-
         analyses_tups = []
         if not skip_jacks:
-            analyses_tups.extend([('jacks_mode', scoresmode), ('jacks_median', scoresmed)])
+            analyses_tups.append(('jacks', scores_jacks))
         # if not skip_mageck:
         #     analyses_tups.append(('mageck', scores_mageck))
 
@@ -591,7 +550,6 @@ def process_arguments(arguments:dict):
     controls = process_control_map(arguments['controls'], samples)
     arguments['controls'] = controls
 
-
     # in case strings are passed instead of lists
     if 'comparisons' in arguments:
         for comp in arguments['comparisons']:
@@ -604,11 +562,25 @@ def process_arguments(arguments:dict):
         for k, v in arguments['sample_reps'].items():
             if type(v) == str:
                 arguments['sample_reps'][k] = [v]
+    print('asklfjd', arguments['sample_reps'])
+    reps_list = []
+    [reps_list.extend(r) for r in arguments['sample_reps'].values()]
 
     with open(arguments['fn_counts']) as f:
         line = next(f)
         if not '\t' in line:
-            raise ValueError('No tabs in file, is it comma seperated?\n\t'+line)
+            raise ConfigurationError(
+                f"No tabs in count file {arguments['fn_counts']}, is it comma seperated?\n\t{line}"
+            )
+        # check for missing/miss-spelled replicates
+        cnt_reps = line.strip().split('\t')
+        print('\n\n**************', reps_list, '\n\n**************', cnt_reps   )
+        missing_reps = [r for r in reps_list if r not in cnt_reps]
+        if missing_reps:
+            raise ValueError(
+                f"Replicates not found in count file: {missing_reps}"
+                f"\nCount columns: {', '.join(cnt_reps)}"
+            )
 
     if not 'labels' in arguments or not arguments['labels']:
         arguments['labels'] = {s:s for s in samples}
@@ -671,6 +643,7 @@ if __name__ == '__main__':
     clargs = parser.parse_args() # need to assign this before calling vars() for some reason
     cmd_args = vars(clargs)
     yml_args = yaml.safe_load(open(cmd_args['fn_yaml']))
+
     del cmd_args['fn_yaml']
 
     # generate outdir from exp_name and analysis_name
@@ -689,6 +662,7 @@ if __name__ == '__main__':
     #print(args)
 
     run_analysis(**args)
+
 
 
 
