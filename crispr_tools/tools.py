@@ -529,3 +529,5 @@ def plot_req_inf(counts, reps, qrange=(0.01,0.1), moi=0.2):
         plt.xlabel("% guides > X ")
         plt.ylabel("required cell infections")
     plt.legend(title='X (guide rep)')
+
+

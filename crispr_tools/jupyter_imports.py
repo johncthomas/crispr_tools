@@ -36,11 +36,26 @@ import statsmodels.api as sm
 
 # just putting this here as it's only for jupyter really
 def plt_labels(xlab='', ylab='', title=''):
+    """Add axes labels and figure title to the current matplotlib Figure"""
     plt.xlabel(xlab)
     plt.ylabel(ylab)
     plt.title(title)
 
 class working_dir:
+    """Context manager to temporarily alter the working directory.
+    Use as part of a `with` statment.
+
+    E.g:
+
+    os.chdir('/path/one')
+    with working_dir('/path/two/'):
+        print(os.getcwd())
+    print(os.getcwd())
+
+    out:
+        [1] /path/two
+        [2] /path/one"""
+
     def __init__(self, new_dir):
         self.new_dir = new_dir
         self.old_dir = os.getcwd()
@@ -68,6 +83,7 @@ def write_excel_text(sheets: Dict[str, pd.DataFrame],
             Lists of column names (including index name) can specify columns.
             A single list applies to all sheets, use a dictionary to specify
             different columns per sheet.
+        **to_excel_kwargs: Additional kwargs are passed to pd.DataFrame.to_excel()
     """
     # tests 'all', text_col is list or dict
 
@@ -112,6 +128,9 @@ def write_excel_text(sheets: Dict[str, pd.DataFrame],
     return writer
 
 def underscore_columns(df):
+    """replace spaces with underscores in all columns of a pandas DF.
+    In place, but returns the DF"""
     df.columns = df.columns.map(lambda x: x.replace(' ', '_'))
+    return df
 
 
