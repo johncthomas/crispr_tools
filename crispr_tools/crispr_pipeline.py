@@ -613,7 +613,8 @@ def process_arguments(arguments:dict):
         pp = pprint.PrettyPrinter(indent=1)
         ctrl_conflicts = check_multicontrol_to_treat(controls)
         if ctrl_conflicts:
-            pp.pprint(ctrl_conflicts)
+            
+            pp.pprint({'\nSamples with conflicts, fix in YAML:':ctrl_conflicts})
             raise RuntimeError('Treatment mapped to multiple controls will cause JACKS error. (see above for samples)')
 
 
