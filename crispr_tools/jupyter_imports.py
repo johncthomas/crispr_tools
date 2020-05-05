@@ -1,3 +1,6 @@
+"""Imports things commonly used by the author."""
+
+
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt

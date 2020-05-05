@@ -531,3 +531,16 @@ def plot_req_inf(counts, reps, qrange=(0.01,0.1), moi=0.2):
     plt.legend(title='X (guide rep)')
 
 
+PathType = Union[str, bytes, os.PathLike]
+
+
+
+def _WIP_get_results(expd: Union[Dict, PathType], results_type='infer'):
+    # load the expd if required
+    if type(expd) is not dict:
+        with open(expd):
+            expd = yaml.safe_load(expd)
+
+    if results_type == 'infer':
+        results_type
+

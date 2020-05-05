@@ -17,6 +17,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 from crispr_tools import qc, tools, jacks_tools
+import pprint
 
 try:
     from jacks.jacks_io import runJACKS
@@ -543,6 +544,31 @@ def process_control_map(controls, samples):
             ctrlmap[ctrl] = samps
     return controls
 
+
+def check_multicontrol_to_treat(control_map):
+    """Check if a single treatment sample is paired to multiple controls
+    (which is not allowed by JACKS at least).
+
+    Returns:
+        {control_group:{treat:[control1, control2]}}
+        for any conflicts are found. An empty dict if there's no problems."""
+    # store conflicts by treat:[ctrl1, ctrl2, ...]
+    conflicts = {grp:{} for grp in control_map.keys()}
+    conflict_found = False
+    for grp, controls in control_map.items():
+        for a, b in combinations(controls.keys(), 2):
+
+            for treatSamp in controls[a]:
+                if treatSamp in controls[b]:
+                    conflict_found = True
+                    try:
+                        conflicts[grp][treatSamp].append(a)
+                    except KeyError:
+                        conflicts[grp][treatSamp] = [a]
+                    conflicts[grp][treatSamp].append(b)
+    if conflict_found:
+        return {grp:cnflct for grp, cnflct in conflicts.items() if cnflct}
+
 def process_arguments(arguments:dict):
     """deal with special keywords from the experiment yaml, and allow some
     ambiguous syntax in the yaml. Also do some checking of validity"""
@@ -582,13 +608,21 @@ def process_arguments(arguments:dict):
                 f"\nCount columns: {', '.join(cnt_reps)}"
             )
 
+    # JACKS doesn't allow you to compare a single treat to multiple controls, so check for that
+    if not arguments['skip_jacks']:
+        pp = pprint.PrettyPrinter(indent=1)
+        pp.pprint(check_multicontrol_to_treat(combined['controls']))
+        raise RuntimeError('Treatment mapped to multiple controls will cause JACKS error. (see above for samples)')
+
+
     if not 'labels' in arguments or not arguments['labels']:
         arguments['labels'] = {s:s for s in samples}
 
     return arguments
 
 
-def do_qcs(count, expd, jobs = ('pca', 'clustermap', 'violinplots', 'regressions')):
+
+def _do_qcs(count, expd, jobs = ('pca', 'clustermap', 'violinplots', 'regressions')):
     """Perform PCAs, clustermap, regressions between clones using both
     normalised counts and lfcs."""
 
