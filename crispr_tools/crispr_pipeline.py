@@ -611,8 +611,10 @@ def process_arguments(arguments:dict):
     # JACKS doesn't allow you to compare a single treat to multiple controls, so check for that
     if not arguments['skip_jacks']:
         pp = pprint.PrettyPrinter(indent=1)
-        pp.pprint(check_multicontrol_to_treat(combined['controls']))
-        raise RuntimeError('Treatment mapped to multiple controls will cause JACKS error. (see above for samples)')
+        ctrl_conflicts = check_multicontrol_to_treat(controls)
+        if ctrl_conflicts:
+            pp.pprint(ctrl_conflicts)
+            raise RuntimeError('Treatment mapped to multiple controls will cause JACKS error. (see above for samples)')
 
 
     if not 'labels' in arguments or not arguments['labels']:
