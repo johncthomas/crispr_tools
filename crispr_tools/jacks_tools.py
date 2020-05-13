@@ -415,6 +415,72 @@ def get_jacks_stats(df, sampx, sampy, negative_sig=True):
     return pd.DataFrame(DISTANCES)
 
 
+def get_t(row, ak, bk, scorek='jacks_score', stdk='stdev'):
+    """T-statistic for A>B. Written for use with DF.apply(get_t, axis=1, ...),
+    but could work with properly formated obj, a dict of dict for example.
+    Uses mean and stdev parameters to calculate t-stats.
+
+    Args:
+        row: Object with keys ak & bk, values are obj with keys scorek & stdk
+        ak: key (column name) for sample A.
+        bk: key (column name) for sample B.
+        scorek: the key to access mean parameter.
+        stdk: the key to access standard deviation param."""
+    # t-statistic:
+    #   abs(x-y)/(x.std+y.std)
+
+    A, B = row[ak], row[bk]
+    diff = A[scorek] - B[scorek]
+    return diff / (A[stdk] + B[stdk])
+
+
+def bootstrap_significance_from_control_genes(
+        jacksRes, ctrlGeneMask, ctrl_k, treat_k,
+        scorek='jacks_score', stdk='stdev'):
+    """Get the significance using t-statistics of control genes (ideally
+    resampled control guides to produce lots of genes). Minimum p will be
+    1/ctrlGeneMask.sum().
+
+    Returns:
+        dict with keys "[enriched/depleted]_[p/fdr]" and values pd.Series
+        with index containing only non-control genes
+
+    Args:
+        jacksRes: pd.DataFrame with multiindex columns (ctrl_k&treat_k, scorek&stdk)
+        ctrlGeneMask: bool mask with same row index as jacksRes, where True
+            specifies a control gene.
+        ctrl_k, treat_k: sample names in jacksRes. Enrichment is defined as higher value
+            in treatment compared to control.
+        scorek, stdk: keys to access mean and stdev parameters to calculate T-statistics.
+
+    """
+    # test if control is higher
+    t_depletion = jacksRes.apply(get_t, axis=1, ak=ctrl_k, bk=treat_k, scorek=scorek,stdk=stdk)
+    # test treat
+    t_enrichment = jacksRes.apply(get_t, axis=1, ak=treat_k, bk=ctrl_k, scorek=scorek,stdk=stdk )
+
+    nFake = ctrlGeneMask.sum()
+    res = {}
+    for ts, label in (t_enrichment, 'enrich'), (t_depletion, 'deplete'):
+        ctrl_ts = ts.loc[ctrlGeneMask]
+        # get proportion of fake gene ts that are greater than each t
+        res[label] = ts.apply(lambda x: (ctrl_ts > x).sum() / nFake)
+
+    enrich_p = res['enrich'].loc[~ctrlGeneMask]
+    deplet_p = res['deplete'].loc[~ctrlGeneMask]
+
+    enrich_fdr = pd.Series(
+        sm.stats.multipletests(enrich_p, method='fdr_bh')[1],
+        index=jacksRes.loc[~ctrlGeneMask].index
+    )[1]
+
+    deplete_fdr = pd.Series(
+        sm.stats.multipletests(deplet_p, method='fdr_bh')[1],
+        index=jacksRes.loc[~ctrlGeneMask].index
+    )[1]
+    return {'enriched_fdr': enrich_fdr, 'depleted_fdr': deplete_fdr,
+            'enriched_p': enrich_p, 'depleted_p': deplet_p, }
+
 # from crispr_tools.tools import tabulate_mageck
 # import os
 # os.chdir('/Users/johnc.thomas/Dropbox/crispr/screens_analysis')
