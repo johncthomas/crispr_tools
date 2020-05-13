@@ -415,28 +415,28 @@ def get_jacks_stats(df, sampx, sampy, negative_sig=True):
     return pd.DataFrame(DISTANCES)
 
 
-def get_t(row, ak, bk, scorek='jacks_score', stdk='stdev'):
+def get_t(row, ak, bk, score_k='jacks_score', sterr_k='stdev'):
     """T-statistic for A>B. Written for use with DF.apply(get_t, axis=1, ...),
     but could work with properly formated obj, a dict of dict for example.
     Uses mean and stdev parameters to calculate t-stats.
 
     Args:
-        row: Object with keys ak & bk, values are obj with keys scorek & stdk
+        row: Object with keys ak & bk, values are obj with keys score_k & sterr_k
         ak: key (column name) for sample A.
         bk: key (column name) for sample B.
-        scorek: the key to access mean parameter.
-        stdk: the key to access standard deviation param."""
+        score_k: the key to access mean parameter.
+        sterr_k: the key to access standard error param."""
     # t-statistic:
     #   abs(x-y)/(x.std+y.std)
 
     A, B = row[ak], row[bk]
-    diff = A[scorek] - B[scorek]
-    return diff / (A[stdk] + B[stdk])
+    diff = A[score_k] - B[score_k]
+    return diff / np.sqrt(A[sterr_k]**2 + B[sterr_k]**2)
 
 
 def bootstrap_significance_from_control_genes(
         jacksRes, ctrlGeneMask, ctrl_k, treat_k,
-        scorek='jacks_score', stdk='stdev'):
+        score_k='jacks_score', sterr_k='stdev'):
     """Get the significance using t-statistics of control genes (ideally
     resampled control guides to produce lots of genes). Minimum p will be
     1/ctrlGeneMask.sum().
@@ -455,9 +455,9 @@ def bootstrap_significance_from_control_genes(
 
     """
     # test if control is higher
-    t_depletion = jacksRes.apply(get_t, axis=1, ak=ctrl_k, bk=treat_k, scorek=scorek,stdk=stdk)
+    t_depletion = jacksRes.apply(get_t, axis=1, ak=ctrl_k, bk=treat_k, scorek=score_k, stdk=sterr_k)
     # test treat
-    t_enrichment = jacksRes.apply(get_t, axis=1, ak=treat_k, bk=ctrl_k, scorek=scorek,stdk=stdk )
+    t_enrichment = jacksRes.apply(get_t, axis=1, ak=treat_k, bk=ctrl_k, scorek=score_k, stdk=sterr_k)
 
     nFake = ctrlGeneMask.sum()
     res = {}
@@ -468,6 +468,10 @@ def bootstrap_significance_from_control_genes(
 
     enrich_p = res['enrich'].loc[~ctrlGeneMask]
     deplet_p = res['deplete'].loc[~ctrlGeneMask]
+
+    # set minimum p value, as we only know that p < 1/nFake when p == 0
+    for ps in enrich_p, deplet_p:
+        ps.loc[ps == 0] = 1/nFake
 
     enrich_fdr = pd.Series(
         sm.stats.multipletests(enrich_p, method='fdr_bh')[1],
