@@ -35,6 +35,8 @@ import itertools
 from itertools import combinations, combinations_with_replacement
 import statsmodels.api as sm
 
+OLS = sm.regression.linear_model.OLS
+
 
 
 # just putting this here as it's only for jupyter really
