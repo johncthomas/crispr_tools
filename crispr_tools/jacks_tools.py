@@ -1,4 +1,4 @@
-import numpy as np
+mport numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import pandas as pd
@@ -344,6 +344,30 @@ def closest_point(ols, xs, ys, verbose=False):
     return np.array(closest_x), np.array(closest_y)
 
 
+def mahalanobis_distance(table, xsample, ysample, line_ig = (0,1), **cp_kwargs):
+    ols = FakeOLS(*line_ig)
+    xs = table[xsample]['jacks_score']
+    ys = table[ysample]['jacks_score']
+    xs_sd = table[xsample]['stdev']
+    ys_sd = table[ysample]['stdev']
+    # get closest points, calc significance
+    cxs, cys = closest_point(ols, xs, ys, **cp_kwargs)
+    mahal_dist = np.sqrt((cxs - xs) ** 2 / xs_sd + (cys - ys) ** 2 / ys_sd)
+    # p: a tuple giving xy. a, b, start and stop of line
+    minx = min(min(xs), min(ys))
+    maxx = max(max(xs), max(ys))
+    a, b = [(minx, ols.predict(minx)), (maxx, ols.predict(maxx))]
+    a, b = np.array(a), np.array(b)
+    points = [np.array(p) for p in zip(xs, ys)]
+    euc_dist = [np.cross(b - a, p - a) / np.linalg.norm(b - a) for p in points]
+    euc_dist = np.array(euc_dist)
+
+    # return negative distance for the depleted genes
+    depleted = euc_dist < 0
+    mahal_dist[depleted] = 0 - mahal_dist[depleted]
+
+    return pd.DataFrame({'Euclidean_dist':euc_dist, 'Mahal_dist':pd.Series(mahal_dist)})
+
 
 def mahal_nocov(xs, xs_sd, ys, ys_sd, line_ig = (0,1), **cp_kwargs):
     """Pass x, y values and stdev. Returns (euclidian distance, p-values of
@@ -417,7 +441,7 @@ def get_jacks_stats(df, sampx, sampy, negative_sig=True):
 
 def get_t(row, ak, bk, score_k='jacks_score', sterr_k='stdev'):
     """T-statistic for A>B. Written for use with DF.apply(get_t, axis=1, ...),
-    but could work with properly formated obj, a dict of dict for example.
+    but could work with properly structured obj, a dict of dict for example.
     Uses mean and stdev parameters to calculate t-stats.
 
     Args:
@@ -446,18 +470,19 @@ def bootstrap_significance_from_control_genes(
         with index containing only non-control genes
 
     Args:
-        jacksRes: pd.DataFrame with multiindex columns (ctrl_k&treat_k, scorek&stdk)
+        jacksRes: pd.DataFrame with multiindex columns
+                (ctrl_k & treat_k, score_k & sterr_k)
         ctrlGeneMask: bool mask with same row index as jacksRes, where True
-            specifies a control gene.
+                specifies a control gene.
         ctrl_k, treat_k: sample names in jacksRes. Enrichment is defined as higher value
-            in treatment compared to control.
-        scorek, stdk: keys to access mean and stdev parameters to calculate T-statistics.
+                in treatment compared to control.
+        score_k, sterr_k: keys to access mean and stdev parameters to calculate T-statistics.
 
     """
     # test if control is higher
-    t_depletion = jacksRes.apply(get_t, axis=1, ak=ctrl_k, bk=treat_k, scorek=score_k, stdk=sterr_k)
+    t_depletion = jacksRes.apply(get_t, axis=1, ak=ctrl_k, bk=treat_k, score_k=score_k,sterr_k=sterr_k)
     # test treat
-    t_enrichment = jacksRes.apply(get_t, axis=1, ak=treat_k, bk=ctrl_k, scorek=score_k, stdk=sterr_k)
+    t_enrichment = jacksRes.apply(get_t, axis=1, ak=treat_k, bk=ctrl_k, score_k=score_k,sterr_k=sterr_k )
 
     nFake = ctrlGeneMask.sum()
     res = {}
@@ -476,21 +501,50 @@ def bootstrap_significance_from_control_genes(
     enrich_fdr = pd.Series(
         sm.stats.multipletests(enrich_p, method='fdr_bh')[1],
         index=jacksRes.loc[~ctrlGeneMask].index
-    )[1]
+    )
 
     deplete_fdr = pd.Series(
         sm.stats.multipletests(deplet_p, method='fdr_bh')[1],
         index=jacksRes.loc[~ctrlGeneMask].index
-    )[1]
+    )
     return {'enriched_fdr': enrich_fdr, 'depleted_fdr': deplete_fdr,
             'enriched_p': enrich_p, 'depleted_p': deplet_p, }
 
-# from crispr_tools.tools import tabulate_mageck
-# import os
-# os.chdir('/Users/johnc.thomas/Dropbox/crispr/screens_analysis')
-# tab = tabulate_mageck('/Users/johnc.thomas/Dropbox/crispr/screens_analysis/scattertst/tst.')
-#
-# scores_scatterplot('B1-vs-B0', 'B2-vs-B0', tab,True, 5,5, distance=tab['B1-vs-B2'].fdr_log10, min_label_diff=0)
-# plt.show()
+try:
+    from jacks.jacks_io import *
+    def run_pseudo_genes(countfile, replicatefile, guidemappingfile,
+                  rep_hdr=REP_HDR_DEFAULT, sample_hdr=SAMPLE_HDR_DEFAULT, common_ctrl_sample=COMMON_CTRL_SAMPLE_DEFAULT,
+                  ctrl_sample_hdr=None, sgrna_hdr=SGRNA_HDR_DEFAULT, gene_hdr=GENE_HDR_DEFAULT,
+                  apply_w_hp=APPLY_W_HP_DEFAULT, norm_type=NORM_TYPE_DEFAULT,
+                  ignore_blank_genes=False, ctrl_genes=None, reffile=None, n_pseudo=0, count_prior=32):
 
+        sample_spec, ctrl_spec, gene_spec, x_ref = preprocess(countfile, replicatefile, guidemappingfile,
+                                                                    rep_hdr, sample_hdr, common_ctrl_sample,
+                                                                    ctrl_sample_hdr, sgrna_hdr, gene_hdr,
+                                                                    ignore_blank_genes, reffile)
+
+        ctrl_geneset = ctrl_genes
+
+        data, meta, sample_ids, genes, gene_index = loadDataAndPreprocess(sample_spec, gene_spec, ctrl_spec=ctrl_spec,
+                                                                          normtype=norm_type, ctrl_geneset=ctrl_geneset,
+                                                                          prior=count_prior)
+
+
+        testdata, ctrldata, test_sample_idxs = collateTestControlSamples(data, sample_ids, ctrl_spec)
+
+
+        # Add a set of pseudo genes, created by randomly sampling from guides targeting genes in the control set
+        LOG.info('Running JACKS inference on %d pseudogenes' % n_pseudo)
+        pseudo_gene_index = createPseudoNonessGenes(gene_index, ctrl_geneset, n_pseudo)
+        # structure of results: results[gene] = (y, tau, x1, x2, w1, w2)
+        jacks_pseudo_results = inferJACKS(pseudo_gene_index, testdata, ctrldata, apply_w_hp=apply_w_hp)
+
+        # get W1 values
+        pseudo_scores = [(np.nanmean(jacks_pseudo_results[gene][4]), gene) for gene in jacks_pseudo_results]
+
+        return pseudo_scores
+
+
+except ImportError:
+    pass
 
