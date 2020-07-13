@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import scipy.stats as stats
 import yaml
+from functools import partial
 revcomp = lambda s: ''.join([dict(zip('ACTGN', 'TGACN'))[nt] for nt in s[::-1]])
 import logging
 
@@ -37,6 +38,10 @@ import statsmodels.api as sm
 
 OLS = sm.regression.linear_model.OLS
 
+def multipletests_fdr(ps, method='fdr_bh', **kwargs):
+    """Calls statsmodels.stats.multipletests and returns the corrected
+    p-values only, with default of fdr_bh, rather than a FWER method."""
+    return sm.stats.multipletests(ps, method=method, **kwargs)[1]
 
 
 # just putting this here as it's only for jupyter really
@@ -76,7 +81,7 @@ class working_dir:
 
 def write_excel_text(sheets: Dict[str, pd.DataFrame],
                      filename: str,
-                     text_columns: Union[List, Dict[str, List[str]]] = 'all',
+                     text_columns: Union[List, Dict[str, List[str]]] = 'ALL',
                      **to_excel_kwargs):
     """Write XLSX with columns optionally formated as text.
     Args:
@@ -84,10 +89,13 @@ def write_excel_text(sheets: Dict[str, pd.DataFrame],
             values DF
         filename: For the written XLSX
         text_columns: Specify columns (by name) to be formated as text.
-            Default 'all' formats all columns as string.
+            Default 'ALL' formats all columns as string.
             Lists of column names (including index name) can specify columns.
             A single list applies to all sheets, use a dictionary to specify
             different columns per sheet.
+            Note: if you can't specify the index, so copy that column to the DF.
+            you can also set index=False to avoid the duplicate, but that doesn't
+            work with multi-index columns.
         **to_excel_kwargs: Additional kwargs are passed to pd.DataFrame.to_excel()
     """
     # tests 'all', text_col is list or dict
@@ -106,24 +114,30 @@ def write_excel_text(sheets: Dict[str, pd.DataFrame],
 
         # get the columns to be textualised
         if text_columns:
-            if text_columns == 'all':
+            if text_columns == 'ALL':
                 txtcols = df.columns
             # if we aren't specifying per sheet
             elif type(text_columns) is list:
                 txtcols = text_columns
             else:
                 txtcols = text_columns[sheet_name]
-                if txtcols == 'all':
+                if txtcols == 'ALL':
                     txtcols = df.columns
 
+            # Note: index formats get written over by pd, and any sensible automated
+            #   solution to work around this uses index=False - but that's incompatible with
+            #   multiindex columns for some fucking reason, so there is no good
+            #   solution for dealing with the index until Pandas impliments
+            #   a stable way of disabling automatic formating of the index
+
+            index_offset = 1
+            if 'index' in to_excel_kwargs:
+                if not to_excel_kwargs['index']:
+                    index_offset = 0
+
             # get indicies of named columns
-            # deal with the index first
             col_i = []
-            if df.index.name in txtcols:
-                col_i.append(0)
-                del txtcols[txtcols.index(df.index.name)]
-            #
-            col_i.extend([list(df.columns).index(c) + 1 for c in txtcols])
+            col_i.extend([list(df.columns).index(c) + index_offset for c in txtcols])
 
             # set the format of selected columns
             for i in col_i:
