@@ -454,7 +454,13 @@ def tabulate_mageck(prefix):
 
 
 def pca_grid(pca, hue_deet, style_deet, max_components=5, also_return_fig=False):
-    """"""
+    """Plot components against each other in a grid of scatter plots.
+    Args:
+        pca: a sklearn.decomposition.PCA() object that has been fit
+        hue_deet: grouping variables used for setting colours, by sample
+        style_deet: as hue_deet but marker style
+        max_components: components to plot, max_comp*(max_comp-1) scatter plots will be produced
+        also_return_fig: When false only axes are returned, set to true to also return the Figures"""
     thing = sns.scatterplot(pca.components_[0], pca.components_[0],
                             hue=hue_deet, style=style_deet,
                             s=150)
