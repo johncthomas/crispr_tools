@@ -1,4 +1,4 @@
-### /usr/bin/env python3
+#!/usr/bin/env python
 import os, sys
 import pandas as pd
 from collections import Counter
@@ -14,7 +14,8 @@ except ImportError:
 from typing import List
 import multiprocessing
 from functools import partial
-
+# make it easy to find print statements used for debugging
+debugprint = print
 
 """Functions for counting and mapping reads from multiple FASTQ files
 to some kind of sequence library, e.g. a CRISPR guide library. 
@@ -25,8 +26,9 @@ It's probably not very useful if either of these things are false.
 Produces dereplicated sequence counts (one file per sample) and then a single
 file containing reads mapped to guide/gene from a library file."""
 
-__version__ = '1.4.1'
+__version__ = '1.5.0'
 
+# 1.5.0 can handle FastA
 # 1.4.1 efficiency when merging the files in map_reads
 # 1.4.0 added fuzzy matching
 # 1.3.4 bug in mapping function
@@ -50,44 +52,83 @@ __version__ = '1.4.1'
 #todo unmerged counts with identical filenames overwrite each other currently in the
 #todo check library seq len and file seq len match.
 
+FILE_FMT = {'a':['.fna', '.fasta', '.fna.gz', '.fasta.gz'],
+              'q': ('.fastq', '.fastq.gz', '.fq', '.fq.gz')}
 
-def count_reads(fn, slicer=(None, None), s_len=None, s_offset=0, ):
-    """Count single .fq reads. Use count_batch for multiple files.
+ALL_FMT = []
+for fmt in FILE_FMT.values():
+    ALL_FMT.extend(fmt)
+
+
+def read_fastq(file_obj):
+    for line in file_obj:
+        if line[0] == '@':
+            s = file_obj.__next__()
+            s = s.replace('\n', '')
+            yield s
+
+def read_fasta(file_obj):
+
+    while True:
+        # not sure why I have to manually deal with StopIter here and not in read_fastq
+        #   maybe .__next__() works better?
+        try:
+            line = next(file_obj)
+
+        except StopIteration:
+            return
+        seq = []
+        while line[0] != '>':
+            seq.append(line.strip())
+            try:
+                line = next(file_obj)
+            except StopIteration as e:
+                break
+        s = ''.join(seq)
+        if s:
+            yield s
+
+
+def count_reads(fn, slicer=(None, None), s_len=None, s_offset=0, file_format='infer') -> Counter:
+    """Count single fastA/Q file's reads. Use count_batch for multiple files.
     Slicer should be a tuple of indicies.
     Returns a Counter.
-
-    s_len and s_offset are depreciated, use Cutadapt instead.
     """
     if type(slicer[0]) == int:
         chop = slice(*slicer)
     seqs_count = Counter()
-    total_seqs = 0
     failed_count = 0
     if fn.endswith('.gz'):
         f = gzip.open(fn, 'rt')
     else:
         f = open(fn)
 
+    if file_format == 'infer':
+        for fm, suffixes in FILE_FMT.items():
+
+            if any([fn.endswith(suf) for suf in suffixes]):
+
+                file_format = fm
+        # else:
+        #     raise RuntimeError('Unknown file format for '+fn, 'Please specify in args.')
+
+    reader = {'q':read_fastq(f), 'a':read_fasta(f)}[file_format]
+
     # parse out the sequences from the FastQ
-    for line in f:
-        total_seqs += 1
-        if line[0] == '@':
-            s = f.__next__()
-            s = s.replace('\n', '')
-            total_seqs+=1
+    for s in reader:
 
-            # get the relevant part of the sequence
-            if s_len is None:
-                s = s[chop]
-            else:
-                try:
-                    i = s.index(slicer)+s_offset
-                    s = s[i:i+s_len]
-                except:
-                    failed_count+=1
-                    continue
+        # get the relevant part of the sequence
+        if s_len is None:
+            s = s[chop]
+        else:
+            try:
+                i = s.index(slicer)+s_offset
+                s = s[i:i+s_len]
+            except:
+                failed_count+=1
+                continue
 
-            seqs_count[s] += 1
+        seqs_count[s] += 1
     f.close()
     print(fn, len(seqs_count), 'unique sequences, ', sum(seqs_count.values()), 'reads')
     if s_len is not None:
@@ -127,6 +168,7 @@ def get_file_list(files_dir) -> List[os.PathLike]:
         files_dir = [files_dir]
     # convert to Path
     files = [Path(f) for f in files_dir]
+
     # get single list of Path, containing all listed files and files in listed dir
     # dir within `files` will be ignored.
     for fndir in files:
@@ -138,12 +180,13 @@ def get_file_list(files_dir) -> List[os.PathLike]:
         else:
             file_list.append(fndir)
     file_list = [fn for fn in file_list if fn.name[0] != '.']
+    print(file_list)
     return file_list
 
 
 def count_batch(fn_or_dir, slicer, fn_prefix='', seq_len=None, seq_offset=0, fn_suffix='.rawcount',
                 fn_split='_R1_', merge_samples=False, just_go=False, quiet=False,
-                allowed_extensions = ('.fastq', 'fastq.gz', '.fq')):
+                file_type = 'infer'):
     """Write a table giving the frequency of all unique sequences from a fastq
     files (or fastq.gz).
 
@@ -202,7 +245,16 @@ def count_batch(fn_or_dir, slicer, fn_prefix='', seq_len=None, seq_offset=0, fn_
     # strings are easier to work with at this point
     file_list = [str(f) for f in file_list]
     #print(file_list)
-    file_list = [ f for f in file_list if any([f.endswith(suf) for suf in allowed_extensions])]
+
+    #banned_files = [any([f.endswith(suf) for suf in allowed_extensions  if f not in file_list]]
+    banned_files = [f for f in file_list if not any([f.endswith(suf) for suf in ALL_FMT])]
+
+    if file_type == 'infer' and banned_files:
+        print(
+            'WARNING, the following files might not be fastq/a (gzipped) and will cause the pipeline to crash:\n'
+            ', '.join(banned_files)
+        )
+        file_list =  [f for f in file_list if f not in banned_files]
 
     # map filenames to samples
     if merge_samples:
@@ -246,6 +298,7 @@ def count_batch(fn_or_dir, slicer, fn_prefix='', seq_len=None, seq_offset=0, fn_
 
     # main loop(s)
     if merge_samples:
+        debugprint(file_dict)
         for samp, fn_or_dir in file_dict.items():
             cnt = Counter()
             for fn in fn_or_dir:
@@ -254,8 +307,9 @@ def count_batch(fn_or_dir, slicer, fn_prefix='', seq_len=None, seq_offset=0, fn_
                 write_count(cnt, samp)
             )
     else:
+        debugprint(file_list)
         for fn in file_list:
-            cnt = count_reads(fn, slicer, seq_len, seq_offset)
+            cnt = count_reads(fn, slicer, seq_len, seq_offset, file_type)
             out_files.append(
                 write_count(cnt, fn.split(fn_split)[0].split('/')[-1])
             )
@@ -416,11 +470,12 @@ if __name__ == '__main__':
     #print('v', __version__)
     parser = argparse.ArgumentParser(description='Count unique sequences in FASTQs. Assumes filenames are {sample_name}_L00?_R1_001.fastq[.gz]')
     parser.add_argument('files', nargs='+',
-                        help="A list of files or dir. All files in given dir that end with .fastq or .fastq.gz or .fq will be counted.")
+                        help="A list of files or dir. All files in given dir that end with valid suffixes (inc. gzips) will be counted.")
+
     parser.add_argument('-s', metavar='M,N',
                         help='Slice indicies to truncate sequences (zero indexed, not end-inclusive). Comma-sep numbers. Required.',
                         required=True)
-    parser.add_argument('-f', default='.rawcount', metavar='FN_SUFFIX',
+    parser.add_argument('--suffix', default='.rawcount', metavar='FN_SUFFIX',
                         help="Suffix added to output files, .txt will always be added after. Default `.rawcount`")
     parser.add_argument('-p',  metavar='FN_PREFIX',
                         help="Prefix added to output files, can include absolute or relative paths.")
@@ -439,19 +494,24 @@ if __name__ == '__main__':
                         'that fuzzily match multiple lib seqs)')
     parser.add_argument('--cpus', type=int, default=cpus, help="Number of processes when doing fuzzy matching. "\
                         "Default set to what's available or 10, whichever's lower.")
+    parser.add_argument('--file_type', metavar='FILE_TYPE', choices={'a', 'q', 'infer'}, default='infer',
+                        help='If your files end in something weird, use "a" for fastA or "q" for fastQ. Cant handle mixed file types.'
+                        'Can handle .gz. By default its infered by the file names.')
     clargs = parser.parse_args()
 
     if clargs.library:
         assert os.path.isfile(clargs.library)
 
+    assert all([os.path.isfile(f) for f in clargs.files])
+
     # slices list of input files, or dir
     slicer = [int(n) for n in clargs.s.split(',')]
 
-    written_fn = count_batch(clargs.files, slicer, clargs.p, None, 0, clargs.f, clargs.fn_split, clargs.merge_samples,
+    written_fn = count_batch(clargs.files, slicer, clargs.p, None, 0, clargs.suffix, clargs.fn_split, clargs.merge_samples,
                 clargs.just_go, clargs.quiet,)
 
     if clargs.library:
         map_counts(written_fn, clargs.library, drop_unmatched=True, report=True, remove_prefix=True,
-                out_fn=clargs.p+'.counts.tsv', splitter=clargs.f,
+                out_fn=clargs.p+'.counts.tsv', splitter=clargs.suffix,
                    fuzzy=clargs.fuzzy_matching, fuzzy_threads=clargs.cpus)
 
