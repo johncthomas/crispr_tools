@@ -209,8 +209,8 @@ def plot_read_violins(tab, samp_per_row='all', column_labs=None, log=True, size_
     else:
         axes = ax
 
-    # if rows == 1:
-    #     axes = [axes]
+    if rows == 1:
+        axes = [axes]
 
     # remove nonnumeric columns
     tab = tab.copy()
