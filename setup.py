@@ -24,7 +24,7 @@ setup(
     #package_data={'files':['files/Hart2017_TableS2_core_genes.txt']},
     install_requires = [
         'numpy', 'scipy', 'matplotlib', 'pandas', 'shapely', 'pyyaml',
-        'statsmodels', 'seaborn', 'attrdict',
+        'statsmodels', 'seaborn', 'attrdict', 'xlsxwriter'
     ],
     python_requires = '>=3.6',
     scripts=['crispr_tools/crispr_pipeline.py', 'crispr_tools/count_reads.py'],

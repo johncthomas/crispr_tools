@@ -1,7 +1,8 @@
-mport numpy as np
+import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import pandas as pd
+import typing
 from typing import Union, List, Dict, Tuple
 #import pickle
 from scipy import stats
@@ -202,6 +203,36 @@ def scores_scatterplot(x, y, table=None, distance_gradient=True, label_pos=0, la
     else:
         return fig, ax
 
+
+# def annotate_scores_scatterplot(x:pd.Series,
+#                                 y:pd.Series,
+#                                 genes_of_interest:typing.Iterable[str],
+#                                 push_size=1, ):
+#     """Alternative method to annotate genes on a scores-scatter. Pushes labels
+#     away on the top-left|bot-right axis before calling adjust_text
+#
+#     ...only really makes sense when you're annotating things in the middle"""
+#
+#     textses = []
+#     # add text above or below the mass... could probably figure out how far to push
+#     # using standard deviation
+#     for gn in genes_of_interest:
+#         gx, gy = x[gn], y[gn]
+#         direxn = [1,-1][0 < (gy - gx)]
+#         tx, ty = gx+(direxn*3*push_size), gy+(direxn*-1*push_size)
+#
+#         textses.append(
+#             plt.annotate(gn, (gx,gy), xytext=(tx,ty))
+#         )
+#
+#     adjust_text(textses, )
+#
+#     for text in textses:
+#         tx, ty = text.get_position()
+#         gx, gy = text.get_xy()
+#
+#         plt.annotate('', (gx,gy), xytext=(tx,ty), arrowprops=dict(arrowstyle='->', color='orange', ))
+#         text.set_zorder(text.zorder+100)
 
 def tabulate_score(prefix, return_ps=False):
     """Return a multiindexed DF of JACKS results.
@@ -512,16 +543,19 @@ def bootstrap_significance_from_control_genes(
 
 try:
     from jacks.jacks_io import *
+
     def run_pseudo_genes(countfile, replicatefile, guidemappingfile,
-                  rep_hdr=REP_HDR_DEFAULT, sample_hdr=SAMPLE_HDR_DEFAULT, common_ctrl_sample=COMMON_CTRL_SAMPLE_DEFAULT,
-                  ctrl_sample_hdr=None, sgrna_hdr=SGRNA_HDR_DEFAULT, gene_hdr=GENE_HDR_DEFAULT,
-                  apply_w_hp=APPLY_W_HP_DEFAULT, norm_type=NORM_TYPE_DEFAULT,
-                  ignore_blank_genes=False, ctrl_genes=None, reffile=None, n_pseudo=0, count_prior=32):
+                         rep_hdr='rep', sample_hdr='samp',
+                         common_ctrl_sample=COMMON_CTRL_SAMPLE_DEFAULT,
+                         ctrl_sample_hdr='ctrl', sgrna_hdr='guide', gene_hdr='gene',
+                         apply_w_hp=APPLY_W_HP_DEFAULT, norm_type=NORM_TYPE_DEFAULT,
+                         ignore_blank_genes=False, ctrl_genes=None, reffile=None, n_pseudo=0, count_prior=32):
+
 
         sample_spec, ctrl_spec, gene_spec, x_ref = preprocess(countfile, replicatefile, guidemappingfile,
-                                                                    rep_hdr, sample_hdr, common_ctrl_sample,
-                                                                    ctrl_sample_hdr, sgrna_hdr, gene_hdr,
-                                                                    ignore_blank_genes, reffile)
+                                                              rep_hdr, sample_hdr, common_ctrl_sample,
+                                                              ctrl_sample_hdr, sgrna_hdr, gene_hdr,
+                                                              ignore_blank_genes, reffile)
 
         ctrl_geneset = ctrl_genes
 
@@ -529,22 +563,26 @@ try:
                                                                           normtype=norm_type, ctrl_geneset=ctrl_geneset,
                                                                           prior=count_prior)
 
-
         testdata, ctrldata, test_sample_idxs = collateTestControlSamples(data, sample_ids, ctrl_spec)
-
 
         # Add a set of pseudo genes, created by randomly sampling from guides targeting genes in the control set
         LOG.info('Running JACKS inference on %d pseudogenes' % n_pseudo)
         pseudo_gene_index = createPseudoNonessGenes(gene_index, ctrl_geneset, n_pseudo)
         # structure of results: results[gene] = (y, tau, x1, x2, w1, w2)
         jacks_pseudo_results = inferJACKS(pseudo_gene_index, testdata, ctrldata, apply_w_hp=apply_w_hp)
+        gene_scores = {}
+        for gene in jacks_pseudo_results.keys():
+            gene_scores[gene] = jacks_pseudo_results[gene][4]
 
-        # get W1 values
-        pseudo_scores = [(np.nanmean(jacks_pseudo_results[gene][4]), gene) for gene in jacks_pseudo_results]
+        gene_scores = pd.DataFrame(gene_scores).T
+        gene_scores.columns = [sample_ids[si] for si in test_sample_idxs]
 
-        return pseudo_scores
+        return gene_scores
 
 
 except ImportError:
+
     pass
+
+
 

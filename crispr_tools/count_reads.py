@@ -5,6 +5,7 @@ from collections import Counter
 import gzip
 import argparse
 from pathlib import Path, PosixPath, WindowsPath
+from typing import Union, Tuple, List, Dict
 try:
     from Levenshtein import distance as levendist
 except ImportError:
@@ -26,9 +27,9 @@ It's probably not very useful if either of these things are false.
 Produces dereplicated sequence counts (one file per sample) and then a single
 file containing reads mapped to guide/gene from a library file."""
 
-__version__ = '1.5.0'
-
-# 1.5.0 can handle FastA
+__version__ = '1.5.1'
+# 1.5.1 removed some unneccesary print calls
+# 1.5.0 added support for FastA
 # 1.4.1 efficiency when merging the files in map_reads
 # 1.4.0 added fuzzy matching
 # 1.3.4 bug in mapping function
@@ -51,6 +52,7 @@ __version__ = '1.5.0'
 #todo more information about matches per file, per sample mapping stats
 #todo unmerged counts with identical filenames overwrite each other currently in the
 #todo check library seq len and file seq len match.
+#todo order reps by
 
 FILE_FMT = {'a':['.fna', '.fasta', '.fna.gz', '.fasta.gz'],
               'q': ('.fastq', '.fastq.gz', '.fq', '.fq.gz')}
@@ -180,7 +182,7 @@ def get_file_list(files_dir) -> List[os.PathLike]:
         else:
             file_list.append(fndir)
     file_list = [fn for fn in file_list if fn.name[0] != '.']
-    print(file_list)
+    #print(file_list)
     return file_list
 
 
@@ -251,7 +253,7 @@ def count_batch(fn_or_dir, slicer, fn_prefix='', seq_len=None, seq_offset=0, fn_
 
     if file_type == 'infer' and banned_files:
         print(
-            'WARNING, the following files might not be fastq/a (gzipped) and will cause the pipeline to crash:\n'
+            'WARNING, the following files might not be fastq/a and will cause the pipeline to crash:\n'
             ', '.join(banned_files)
         )
         file_list =  [f for f in file_list if f not in banned_files]
@@ -298,7 +300,7 @@ def count_batch(fn_or_dir, slicer, fn_prefix='', seq_len=None, seq_offset=0, fn_
 
     # main loop(s)
     if merge_samples:
-        debugprint(file_dict)
+        #debugprint(file_dict)
         for samp, fn_or_dir in file_dict.items():
             cnt = Counter()
             for fn in fn_or_dir:
@@ -307,7 +309,7 @@ def count_batch(fn_or_dir, slicer, fn_prefix='', seq_len=None, seq_offset=0, fn_
                 write_count(cnt, samp)
             )
     else:
-        debugprint(file_list)
+        #debugprint(file_list)
         for fn in file_list:
             cnt = count_reads(fn, slicer, seq_len, seq_offset, file_type)
             out_files.append(
@@ -341,15 +343,40 @@ def get_count_table_from_file_list(file_list:List[Path], splitter='.raw', remove
     return pd.DataFrame(rawcnt).fillna(0).astype(int)
 
 
-def map_counts(fn_or_dir, lib, guidehdr='guide', genehdr='gene',
+def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
+               seqhdr='seq', guidehdr='guide', genehdr='gene',
                drop_unmatched=False, report=False, splitter='.raw',
                remove_prefix=True, out_fn=None, fuzzy=False, fuzzy_threads=None,
-               ignore_singletons=False):
-    """lib needs to be indexed by guide sequence. If it's not a DF a DF will
-    be loaded and indexed by 'seq' or the first column. Returns a DF indexed
-    by 'guide' with 'gene' as the second column.
+               ignore_singletons=False) -> pd.DataFrame:
+    """
+    Map guide sequences in a set of files containing guide sequences and abundance
+    using a library file.
 
+    Returns a DataFrame indexed by guide name, and columns giving guide abundance
+    per replicate.
 
+    Args:
+        fn_or_dir: Directory, or list of directories/files from which rawcount
+            files will be processed.
+        lib: library file or DF containing the guide sequences and guide
+        seqhdr: library column header indicating guide sequences
+        guidehdr: library column header indicating guide names
+        genehdr: library column header indicating gene names
+        drop_unmatched: When True reads matching no sequence in the library
+            file are dropped.
+        report: When True, print stats about the mapping
+        splitter: column headers in output table will be
+            <prefix>.<filename>.split(splitter)[0]
+        remove_prefix: drop the prefix from column headers
+        out_fn: Write DF to filename, if provided
+        fuzzy: If True use fuzzy matching... Don't set to True
+        fuzzy_threads: ...
+        ignore_singletons: Don't attempt to map sequences that only appear
+            once in all the rawcount files. Speeds things up, singletons
+            represent ~40% of unique sequences but there's only one of them.
+
+    Returns:
+        pd.DataFrame
     """
 
     if fuzzy and fuzzy_threads is None:
@@ -363,8 +390,8 @@ def map_counts(fn_or_dir, lib, guidehdr='guide', genehdr='gene',
         else:
             sep = '\t'
         lib = pd.read_csv(lib, sep)
-        if 'seq' in lib.columns:
-            lib.set_index('seq', drop=False, inplace=True)
+        if seqhdr in lib.columns:
+            lib.set_index(seqhdr, drop=False, inplace=True)
         else:
             lib.set_index(lib.columns[0])
     # else the library should be in a useable form.

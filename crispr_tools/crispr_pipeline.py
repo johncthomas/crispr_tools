@@ -59,6 +59,7 @@ from crispr_tools.version import __version__
 #todo QC by default!!
 #todo save yaml in output dir
 #todo handle different analyses better, making it easy to add new ones and turn of during analysis
+#todo Either run_{method} or call_{method}
     # in particular there should be functions for each that take the exact same arguments.
 
 
@@ -149,9 +150,15 @@ def write_repmap(sample_reps:Dict[str, list], ctrlmap:Dict[str, list], repmap_fn
 
 
 
-def run_drugZ(fn_counts, outdir, file_prefix,
-                 sample_reps:Dict[str, list],
-                 controls:Dict[str, Dict[str, list]], drugz_args:dict=None):
+def call_drugZ(fn_counts, outdir, file_prefix,
+               sample_reps:Dict[str, list],
+               controls:Dict[str, Dict[str, list]], drugz_args:dict=None):
+    """output files written to {outdir}/{file_prefix}.{ctrl}-{treat}.tsv
+
+    One file per comparison, in the default drugz format. Use tabulate_drugz to
+    get a standardised table"""
+    if drugz_args is None:
+        drugz_args = {}
 
     dzargs = AttrDict()
     dzargs.infile = fn_counts
@@ -162,6 +169,7 @@ def run_drugZ(fn_counts, outdir, file_prefix,
     dzargs.quiet = False
     dzargs.pseudocount = 1
     dzargs.fc_outfile=''
+    dzargs.unpaired = False
 
     # not implimented in drugZ at time of writing
     dzargs.remove_genes = None
@@ -196,7 +204,7 @@ def run_drugZ(fn_counts, outdir, file_prefix,
 
 
 def call_mageck(control_samp:str, treat_samp:str, sample_reps:Dict[str, List[str]],
-                fn_counts:str, prefix:str, kwargs:dict, logger=None):
+                fn_counts:str, prefix:str, kwargs:List[Dict], logger=None, dryrun=False):
     """Call mageck from the command line:
         "mageck test -k {counts} -t {treat} -c {ctrl} -n {outprefix}{ctrlnm}-{sampnm}"
 
@@ -206,7 +214,8 @@ def call_mageck(control_samp:str, treat_samp:str, sample_reps:Dict[str, List[str
         sample_reps: Dict giving mapping of sample to replicates, replicate names match
             column headers in counts file.
         prefix: Prefix added to all created files, should include desired output dir.
-        kwargs: Keyword arguments to be passed on to mageck.
+        kwargs: Keyword arguments to be passed on to mageck. If kwarg is flag it should
+            be in the format {'flag-kwarg':''}
 
     """
     mageck_str = "mageck test -k {counts} -t {treat} -c {ctrl} -n {outprefix}{ctrlnm}-{sampnm}"
@@ -223,12 +232,17 @@ def call_mageck(control_samp:str, treat_samp:str, sample_reps:Dict[str, List[str
     )
     mag_additional_args = []
     if kwargs:
+
         mag_additional_args = [f"--{_k} {_v}" for _k, _v in kwargs.items()]
+
     mag_args = s.split() + mag_additional_args
     # for some reason mageck fails to understand mag_args if you don't use shell=True
+    command = ' '.join(mag_args)
     if logger:
-        logger.info(' '.join(mag_args))
-    call(' '.join(mag_args), shell=True)
+        logger.info(command)
+    print(command)
+    if not dryrun:
+        call(command, shell=True)
 
 # CALL SIGNATURE MUST MATCH CALL JACKS and any others
 #todo one function/class as wrapper for all analysis methods
@@ -284,6 +298,7 @@ def run_analysis(fn_counts, outdir, file_prefix,
                  dont_log=False, exp_name='', analysis_name='',
                  skip_extra_mageck = False, jacks_kwargs:Dict=None,
                  mageck_kwargs:dict=None,
+                 drugz_kwargs:dict=None,
                  ctrl_genes:str=None, notes='', **unused_args):
 
 
@@ -292,7 +307,7 @@ def run_analysis(fn_counts, outdir, file_prefix,
         #haaaacky, but the fact it cant make a dir and subdir at the same time is annoying
     p = str(outdir)
     for i in range(len(p)):
-        print(p)
+        #print(p)
         d = p.split('/')[:i+1]
         try:
             os.mkdir('/'.join(d))
@@ -301,6 +316,8 @@ def run_analysis(fn_counts, outdir, file_prefix,
 
     if jacks_kwargs is None:
         jacks_kwargs = {}
+    if drugz_kwargs is None:
+        drugz_kwargs = {}
 
     if ctrl_genes:
         jacks_kwargs['ctrl_genes'] = ctrl_genes
@@ -318,7 +335,8 @@ def run_analysis(fn_counts, outdir, file_prefix,
         t = '{}-{}-{}_{}h{}m{}s.{}'.format(*datetime.datetime.now().timetuple()[:-1])
         set_logger(str(Path(outdir, file_prefix + f'log_{t}.txt')))
 
-        sys.stderr = StreamToLogger(pipeLOG, logging.ERROR)
+        #TODO sort out logging situtation, just have thing that prints and writes and logs the same message?
+        #sys.stderr = StreamToLogger(pipeLOG, logging.ERROR)
     pipeLOG.info('exp_name = ' + exp_name)
     pipeLOG.info('analysis_name = ' + analysis_name)
     pipeLOG.info('Version = '+__version__)
@@ -353,7 +371,7 @@ def run_analysis(fn_counts, outdir, file_prefix,
 
         if not charts_only and not skip_drugz:
             pipeLOG.info('Running DrugZ.')
-            run_drugZ(fn_counts, outdir, file_prefix, sample_reps, controls, {})
+            call_drugZ(fn_counts, outdir, file_prefix, sample_reps, controls, drugz_kwargs)
 
         ############
         #* Get tables
@@ -588,7 +606,7 @@ def process_arguments(arguments:dict):
         for k, v in arguments['sample_reps'].items():
             if type(v) == str:
                 arguments['sample_reps'][k] = [v]
-    print('asklfjd', arguments['sample_reps'])
+    #print('asklfjd', arguments['sample_reps'])
     reps_list = []
     [reps_list.extend(r) for r in arguments['sample_reps'].values()]
 
@@ -600,7 +618,7 @@ def process_arguments(arguments:dict):
             )
         # check for missing/miss-spelled replicates
         cnt_reps = line.strip().split('\t')
-        print('\n\n**************', reps_list, '\n\n**************', cnt_reps   )
+        #print('\n\n**************', reps_list, '\n\n**************', cnt_reps   )
         missing_reps = [r for r in reps_list if r not in cnt_reps]
         if missing_reps:
             raise ValueError(
@@ -613,7 +631,7 @@ def process_arguments(arguments:dict):
         pp = pprint.PrettyPrinter(indent=1)
         ctrl_conflicts = check_multicontrol_to_treat(controls)
         if ctrl_conflicts:
-            
+
             pp.pprint({'\nSamples with conflicts, fix in YAML:':ctrl_conflicts})
             raise RuntimeError('Treatment mapped to multiple controls will cause JACKS error. (see above for samples)')
 

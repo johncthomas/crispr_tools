@@ -7,7 +7,7 @@ from crispr_tools import *
 from attrdict import AttrDict
 import os
 from crispr_tools.crispr_pipeline import process_control_map
-from crispr_tools.qc import get_clonal_lfcs
+from crispr_tools.tools import get_clonal_lfcs
 from copy import copy
 import pathlib
 class CrisprExperiment:
@@ -121,5 +121,7 @@ class CrisprExperiment:
 #                 )
 
 #             return self._clonal_lfc
+
+
 
 

@@ -1,17 +1,25 @@
-import os
+import os, itertools
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy import stats
 import seaborn as sns
 import yaml
+
 try:
     from adjustText import adjust_text
 except ModuleNotFoundError:
     def adjust_text(*args, **kwargs):
         pass
-from typing import List, Union, Dict, Collection, Iterable
+from typing import List, Union, Dict, Collection, Iterable, Tuple
+PathType = Union[str, bytes, os.PathLike]
 from pathlib import Path, PosixPath, WindowsPath
 import pandas as pd
+from itertools import zip_longest
+from attrdict import AttrDict
+import statsmodels.api as sm
+OLS = sm.regression.linear_model.OLS
+import xlsxwriter
+
 #import multiprocessing as mp
 
 hart_list = ['AARS1', 'ABCE1', 'ABCF1', 'ACTB', 'ACTL6A', 'ACTR10', 'ACTR2',
@@ -311,7 +319,7 @@ def plot_volcano_from_mageck(tab, title='', label_genes=None, outfn='', ax=None,
 
 def plot_volcano(lfc, fdr, tab=None, title='', label_deplet=0, label_enrich=0,
                  other_labels=None, p_thresh=0.05, outfn='', ax=None,
-                 exclude_labs = ('NonT', 'Rando'), plot_kw:dict=None):
+                 exclude_labs=('NonT', 'Rando'), plot_kw: dict = None):
     """Draw a volcano plot of lfc vs fdr. assumes fdr is -log10.
 
     :param lfc: str giving tab[lfc] or series with gene names as index
@@ -326,9 +334,9 @@ def plot_volcano(lfc, fdr, tab=None, title='', label_deplet=0, label_enrich=0,
     :param ax: optional plt.Axes instance to use
     :return: plt.Axes
     """
-    #print('TP ', POINT)
+    # print('TP ', POINT)
 
-    #this is silly
+    # this is silly
     lfc_lab, fdr_lab = None, None
     if tab is not None:
         lfc_lab = lfc
@@ -342,7 +350,8 @@ def plot_volcano(lfc, fdr, tab=None, title='', label_deplet=0, label_enrich=0,
 
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(8, 12))
-    #todo update to use scatter and set minimum matplotlib version
+
+    # todo update to use scatter and set minimum matplotlib version
     ax.plot(lfc, fdr, **sctkw)
     # plt.yscale('log')
     # plt.gca().invert_yaxis()
@@ -373,26 +382,27 @@ def plot_volcano(lfc, fdr, tab=None, title='', label_deplet=0, label_enrich=0,
         enrmask = (lfc > 0)
 
     # get tails from ascending order
-    dep = tab.loc[depmask, :].sort_values(lfc_lab, ascending=False).sort_values(fdr_lab).tail(label_deplet)[fdr_lab]
-    enr = tab.loc[enrmask, :].sort_values([fdr_lab, lfc_lab]).tail(label_enrich)[fdr_lab]
-    # label the tails
-    for end in dep, enr:
-        for lab, an_fdr in end.items():
-            if an_fdr < p_thresh:
-                continue
-            texts_done.append(lab)
-            texts.append(plt.text(lfc[lab], fdr[lab], lab))
+    if tab is not None:
+        dep = tab.loc[depmask, :].sort_values(lfc_lab, ascending=False).sort_values(fdr_lab).tail(label_deplet)[fdr_lab]
+        enr = tab.loc[enrmask, :].sort_values([fdr_lab, lfc_lab]).tail(label_enrich)[fdr_lab]
+        # label the tails
+        for end in dep, enr:
+            for lab, an_fdr in end.items():
+                if an_fdr < p_thresh:
+                    continue
+                texts_done.append(lab)
+                texts.append(plt.text(lfc[lab], fdr[lab], lab))
     # label additional genes
     if other_labels is not None:
         for lab in other_labels:
             if lab in texts_done:
                 continue
             texts.append(
-                plt.text(lfc[lab], fdr[lab], lab)
+                ax.text(lfc[lab], fdr[lab], lab)
             )
 
     if texts and adjust_text:
-        adjust_text(texts, arrowprops=dict(arrowstyle='->', color='red'))
+        adjust_text(texts, arrowprops=dict(arrowstyle='->', color='red'), ax=ax)
 
     if lfc_lab is None:
         ax.set_xlabel('Log$_2$ Fold Change')
@@ -409,6 +419,17 @@ def plot_volcano(lfc, fdr, tab=None, title='', label_deplet=0, label_enrich=0,
 
 revcomp = lambda s: ''.join([dict(zip('ACTGN', 'TGACN'))[nt] for nt in s[::-1]])
 
+def iter_files_by_prefix(prefix:Union[str, Path], req_suffix=None):
+    prefix = Path(prefix)
+    check_suffix = lambda s: s.endswith(req_suffix) if req_suffix is not None else True
+
+    for fn in os.listdir(prefix.parent):
+        # filter incorrect files, the '._' are mac files that are not ignored automatically on unix filesystem
+        if not check_suffix(fn) or \
+                prefix.parts[-1] not in fn or \
+                fn.startswith('._'):
+            continue
+        yield fn
 
 def tabulate_mageck(prefix):
     """
@@ -418,12 +439,8 @@ def tabulate_mageck(prefix):
     prefix = Path(prefix)
     tables = {}
     tab = None
-    for fn in os.listdir(prefix.parent):
-        # select correct files, the '._' are mac files that get caught on unix filesystem
-        if not fn.endswith('.gene_summary.txt') or \
-                prefix.parts[-1] not in fn or \
-                fn.startswith('._'):
-            continue
+    for fn in iter_files_by_prefix(prefix, '.gene_summary.txt'):
+
         #mtab from the mageck output, reformatted into tab
         mtab = pd.read_csv(prefix.parent / fn, '\t', index_col=0)
         tab = pd.DataFrame(index=mtab.index)
@@ -452,6 +469,44 @@ def tabulate_mageck(prefix):
     tbcolumns = pd.MultiIndex.from_product(
         [sorted(tables.keys()), ['lfc', 'fdr', 'fdr_log10', 'p', 'p_log10', 'pos_p', 'neg_p',
                                  'neg_fdr', 'pos_fdr']],
+        1
+    )
+    table = pd.DataFrame(index=tab.index, columns=tbcolumns)
+    for exp, tab in tables.items():
+        # deal with missing genes
+        m = tab.isna().any(1)
+        tab.loc[m, :] = 1
+        tab.loc[m, ['lfc', 'fdr_log10', 'p_log10']] = 0
+        table[exp] = tab
+
+
+
+    return table
+
+def tabulate_drugz(prefix, compjoiner='→'):
+    prefix=Path(prefix)
+    tables = {}
+    for fn in iter_files_by_prefix(prefix):
+        comp = fn[len(prefix.parts[-1]):-4].replace('-', compjoiner)
+
+        tab = pd.read_csv(os.path.join(os.path.split(prefix)[0], fn), '\t', index_col=0)
+
+        # sort out the column names to be consistent with other results tables
+        tab.index.name = 'gene'
+        tab = tab.loc[:, ['normZ', 'pval_synth', 'fdr_synth', 'pval_supp', 'fdr_supp']]
+        stats_cols = 'normZ neg_p neg_fdr pos_p pos_fdr'.split()
+
+        tab.columns = stats_cols
+
+        # get the minimum value significance stats
+        for stat in 'p', 'fdr':
+            min_stat = tab.loc[:, [f'neg_{stat}', f'pos_{stat}']].min(1)
+            tab.loc[:, f'{stat}'] = min_stat
+            tab.loc[:, f'{stat}_log10'] = min_stat.apply(lambda p: -np.log10(p))
+        tables[comp] = tab
+
+    tbcolumns = pd.MultiIndex.from_product(
+        [sorted(tables.keys()), tab.columns],
         1
     )
     table = pd.DataFrame(index=tab.index, columns=tbcolumns)
@@ -544,11 +599,12 @@ def plot_req_inf(counts, reps, qrange=(0.01,0.1), moi=0.2):
     plt.legend(title='X (guide rep)')
 
 
-PathType = Union[str, bytes, os.PathLike]
+
 
 
 def load_analyses_via_expd(expd_or_yaml:Union[Dict, PathType],
-                           results_types:Union[str, List[str]]='infer') -> Dict[str, Dict[str, pd.DataFrame]]:
+                           results_types:Union[str, List[str]]='infer',
+                           use_attrdict=True) -> Dict[str, Dict[str, pd.DataFrame]]:
     """Return results from tables generated by crispr_pipeline.py.
 
     results_types is inferred from the yaml by default, or a single string or
@@ -572,15 +628,445 @@ def load_analyses_via_expd(expd_or_yaml:Union[Dict, PathType],
             if not expd[f"skip_{rt}"]:
                 results_types.append(rt)
 
-    all_results = {}
+    LocalDict = {}
+    if use_attrdict:
+        LocalDict = AttrDict
+    all_results = LocalDict()
+
 
     for rt in results_types:
-        all_results[rt] = res = {}
+        all_results[rt] = res = LocalDict()
         for ctrl_grp in expd['controls'].keys():
             fn = f"{expd['exp_name']}/{expd['analysis_name']}/{rt}/tables/{expd['file_prefix']}.{ctrl_grp}.{suffixes[rt]}.csv"
             res[ctrl_grp] = pd.read_csv(fn, index_col=0, header=[0, 1])
+    if use_attrdict:
+        return AttrDict(all_results)
     return all_results
 
+def select_clonal_lfc_by_samp(control_samp, treat_samp, lfcs, sample_reps,):
+    #todo make a ClonalLFC object with this as a method
+
+    ctrl_reps  = sample_reps[control_samp]
+    treat_reps = sample_reps[treat_samp]
+
+    # get bool masks of comps with the control reps, and treat reps
+    ctrl_mask, treat_mask = [lfcs.columns.map(lambda s: s.split('-')[i] in reps)
+                             for i, reps in ((0, ctrl_reps), (1, treat_reps))]
+
+    return lfcs.loc[:, ctrl_mask.values & treat_mask.values]
 
 
+
+def get_clonal_lfcs(lncounts, ctrl_dict:dict, sample_reps:dict,
+                    lognorm=False):
+    """get a DF of clonal LFCs using the ctrl/sample pairs specified by ctrl_dict.
+    Assumes that clones are grouped by order of appearance in sample_reps"""
+    _lfcs = {}
+
+    if lognorm:
+        lncounts = size_factor_normalise(lncounts)
+
+    for ctrl_samp, treat_samples in ctrl_dict.items():
+        treat_samples = list_not_str(treat_samples)
+        for trt_samp in treat_samples:
+            # we shall assume that the clones are int he same order in sample_reps
+            c_reps, t_reps = sample_reps[ctrl_samp], sample_reps[trt_samp]
+            for A, B in (c_reps, t_reps), (t_reps, c_reps):
+                while len(A) < len(B):
+                    A.append(A[0])
+
+            treat_clone_pairs = zip_longest(B, A)
+            for c, t in treat_clone_pairs:
+
+                _lfcs[c+'-'+t] = lncounts[t] - lncounts[c]
+
+    return pd.DataFrame(_lfcs)
+
+
+def write_results_excel(results:Dict[str, pd.DataFrame],
+                        filename,
+                        score_name='',
+                        stat_labels:Dict[str, str]=None):
+    """Write the results from a single analysis to an Excel file.
+    By default columns fdr, fdr_log10, neg_p, pos_p are included.
+    Args:
+        results: A dict of DataFrames. The keys will be used to name the sheets
+        filename: name of the file that will be written
+        score_name: 'lfc' or 'jacks_score' depending on what was used. Use
+            stat_labels for anything else.
+        stat_labels: Custom columns can be included in the output by passing a
+            dictionary with dataframe_label:output_label mapped. You'll
+            need to include every stat of interest.
+    """
+    # todo instead of worksheets with comps, write each comp to its own worksheet
+    #   should probably be optional. Would drop the top row which is good.
+
+    import xlsxwriter
+
+    if not score_name and stat_labels is None:
+        RuntimeWarning('No score key included')
+
+    if not filename.endswith('.xlsx'):
+        filename += '.xlsx'
+    workbook = xlsxwriter.Workbook(filename)
+
+    for sheetname, tab in results.items():
+        tab = tab.copy()
+        # ** rename the stats columns **
+        #    this could be in a separate function...
+
+        tab.index.name = 'Gene'
+        # get the score label for common scores
+        score_lab = {'lfc':'Log2(FC)', 'jacks_score':'JACKS score', '':''}[score_name]
+
+        if stat_labels:
+            good_stats = stat_labels
+        else:
+            good_stats = dict(
+                zip(['fdr', 'fdr_log10', score_name, 'neg_p', 'pos_p'],
+                    ['FDR', '–Log10(FDR)', score_lab, 'Dropout p-value', 'Enrichment p-value'])
+            )
+
+        # orginally wrote this to work with multiindex columns, but also
+        if hasattr(tab.columns, 'levels'):
+            # get the new name for favoured stats, and record those to be removed
+            new_level = []
+            dump_stats = []
+            for c in tab.columns.levels[1]:
+                try:
+                    new_level.append(good_stats[c])
+                except KeyError:
+                    new_level.append(c)
+                    dump_stats.append(c)
+
+            # change the labels of the ones we care for
+            tab.columns.set_levels(new_level, 1, inplace=True)
+            # drop the values from the table, does not effect the index
+            tab.drop(dump_stats, 1, level=1, inplace=True)
+
+            # generate a new multiindex
+            new_multiindex = []
+            for col in tab.columns:
+                if col[1] not in dump_stats:
+                    new_multiindex.append(col)
+
+            tab.columns = pd.MultiIndex.from_tuples(new_multiindex)
+
+
+        # ** Write the worksheet **
+        sheet = workbook.add_worksheet(name=sheetname)
+
+        index_format = workbook.add_format({'bold': True, 'num_format': '@', 'align': 'right'})
+        header_format = workbook.add_format({'bold': True, 'num_format': '@', 'align': 'center'})
+        num_format = workbook.add_format({'num_format': '0.00'})
+
+        # do the cell merge, we're gonna use the length of levels[1] to figure out the merge range
+        n_to_merge = len(tab.columns.levels[1])
+        samples = tab.columns.levels[0]
+
+        for samp_i, samp in enumerate(samples):
+            # row, col, row, col
+            sheet.merge_range(0, 1 + samp_i * n_to_merge, 0, 0 + (samp_i + 1) * n_to_merge, samp, header_format)
+
+        # write the index header
+        sheet.write(0, 0, 'Gene')
+
+        # write the stats headers
+        for coli, (c1, c2) in enumerate(tab.columns):
+            # c1 gets wrote using merge, above
+            sheet.write(1, coli + 1, c2, index_format)
+
+        for row_i, gene in enumerate(tab.index):
+            sheet.write(2 + row_i, 0, gene, index_format)
+
+        for col_i, col in enumerate(tab):
+            for row_i, val in enumerate(tab[col]):
+                if not np.isnan(val):
+                    sheet.write(row_i + 2, col_i + 1, val, num_format)
+
+    workbook.close()
+
+
+def write_stats_workbook(sheets: Dict[str, pd.DataFrame], filename=None,
+                         workbook:xlsxwriter.Workbook=None,
+                         close_workbook=True) -> xlsxwriter.Workbook:
+    """First row and column bold text, everything else numbers with 3 d.p.
+
+    Args:
+        sheets: dict containing dataframes to be written, keys used as sheet names.
+        filename: The path to which the file will be written. Not required if passing
+            an open workbook
+        workbook: An xlsxwriter.Workbook can be passed
+        close_workbook: Close and write the workbook if True.
+    """
+
+    if workbook is None:
+        if filename is None and close_workbook:
+            raise RuntimeError('Provide a filename, or set close_workbook=False to avoid an Error')
+        workbook = xlsxwriter.Workbook(filename)
+    index_format = workbook.add_format({'bold': True, 'num_format': '@', 'align': 'right'})
+    header_format = workbook.add_format({'bold': True, 'num_format': '@', 'align': 'center'})
+    num_format = workbook.add_format({'num_format': '0.000'})
+
+    for sheet_name, tab in sheets.items():
+
+        sheet = workbook.add_worksheet(name=sheet_name)
+
+        # write the index header
+        sheet.write(0, 0, 'Gene')
+
+        # write the stats headers
+        for coli, c in enumerate(tab.columns):
+            # print(c)
+            sheet.write(0, coli + 1, c, header_format)
+
+        for row_i, gene in enumerate(tab.index):
+            sheet.write(1 + row_i, 0, gene, index_format)
+
+        for col_i, col in enumerate(tab):
+            for row_i, val in enumerate(tab[col]):
+                sheet.write(row_i + 1, col_i + 1, val, num_format)
+    if close_workbook:
+        workbook.close()
+    return workbook
+
+def quantile_normalise(df):
+    rank_mean = df.stack().groupby(df.rank(method='first').stack().astype(int)).mean()
+    return df.rank(method='min').stack().astype(int).map(rank_mean).unstack()
+
+
+
+# function that takes two samples and returns ps based on control mask
+def ps_from_kde(x, y, ctrl_mask, table=None, score_key='jacks_score',
+                delta_lobf=False):
+    if table is not None:
+        x, y = [table[k][score_key] for k in (x, y)]
+
+    if delta_lobf:
+        # get the delta of y from y predicted by lobf
+        fit = OLS(y, sm.add_constant(x)).fit()
+        pred_y = fit.predict(sm.add_constant(x))
+        diff = y - pred_y
+    else:
+        diff = y - x
+
+    ctrls = diff.loc[ctrl_mask]
+    kde_dist = stats.gaussian_kde(ctrls)
+    dep_ps = diff.loc[~ctrl_mask].apply(
+        lambda x: kde_dist.integrate_box_1d(-100, x)
+    )
+    enr_ps = 1 - dep_ps
+    dep_fdr, enr_fdr = [sm.stats.multipletests(ps, method='fdr_bh', )[1]
+                        for ps in (dep_ps, enr_ps)]
+    return pd.DataFrame({"enriched_p": enr_ps,
+                         "depleted_p": dep_ps,
+                         "enriched_fdr": enr_fdr,
+                         "depleted_fdr": dep_fdr}, index=diff.index)
+
+
+def scores_scatter_plotly(x, y, fdr,
+                          fdr_thresholds=(0.05,),
+                          fdr_colours=('#CC7700',),
+                          gene_set_masks: List[Tuple] = None, ):
+    """gene_set_masks, [('label1', mask1), ('label2', mask2), ...]. Mask here either a
+    pd.Series boolean mask, or list of genes that can be passed to .loc[]"""
+    from plotly import graph_objects as go
+    fig = go.Figure()
+    fig.update_layout(template='plotly_white')
+    Xall = x
+    Yall = y
+
+    # These will be populated with values and passed to go.Scatter
+    xys = []
+    marker_labels = []
+    markers = []
+    symbols = []
+
+    # get list of genes between FDR thresholds
+    #  Sort thresholds and colours, largest to smallest
+    sranks = stats.rankdata(fdr_thresholds, 'ordinal')
+    fdr_thresholds = sorted(fdr_thresholds, key=lambda x: sranks[fdr_thresholds.index(x)], reverse=True)
+    fdr_colours = sorted(fdr_colours, key=lambda x: sranks[fdr_colours.index(x)], reverse=True)
+
+    # rank big to small
+    sranks = stats.rankdata(fdr_thresholds, 'ordinal')
+    fdr_thresholds = [1] + sorted(fdr_thresholds, key=lambda x: sranks[fdr_thresholds.index(x)], reverse=True)
+    fdr_colours = ['#d9d9d9'] + sorted(fdr_colours, key=lambda x: sranks[fdr_colours.index(x)], reverse=True)
+
+    # get masks giving a gene's fdr bracket
+    sig_masks = []
+    genes_in_mask = []
+    for i in range(len(fdr_thresholds) - 1):
+        m = (fdr_thresholds[i + 1] < fdr) & (fdr <= fdr_thresholds[i])
+        m = m[m].index
+        sig_masks.append(m)
+        genes_in_mask.extend(m)
+    m = fdr < fdr_thresholds[-1]
+    sig_masks.append(m[m].index)
+
+    # populate the fdr related Scatter values
+    for m, c in zip(sig_masks, fdr_colours):
+        xys.append((Xall.loc[m], Yall.loc[m]))
+        symbols.append('circle-open')
+        markers.append(dict(color=c, size=7))
+
+    marker_labels.append(f"FDR > {fdr_thresholds[1]}")
+    for thresh in fdr_thresholds[1:]:
+        marker_labels.append(f"FDR < {thresh}")
+    # finished with FDR
+
+    # populate gene set scatter values
+    if gene_set_masks is not None:
+        for lab, m in gene_set_masks:
+            xys.append((Xall.loc[m], Yall.loc[m]))
+            symbols.append('circle')
+            markers.append(dict(size=4))
+            marker_labels.append(lab)
+
+    # plot it finally
+    for (x, y), data_label, marker, symbol in zip(xys, marker_labels, markers, symbols):
+        fig.add_trace(
+            go.Scatter(
+                x=x, y=y,
+                name=data_label,
+                mode='markers',
+                marker_symbol=symbol,
+                marker=marker,
+                text=x.index,
+                customdata=fdr.loc[x.index],
+                hovertemplate='%{text}:<br>  %{x:.2f},%{y:.2f}<br>  FDR=%{customdata:.2f}',
+
+            )
+        )
+
+    return fig
+
+def write_plotly_html(results_table:pd.DataFrame,
+                      xy_key:str,
+                      samplePairs:Iterable=None,
+                      gene_set_masks:Tuple[str, pd.Series]=None,
+                      fdr_thresholds=(0.05,),
+                      fdr_colours=('#CC7700',),
+                      out_fmt_str='',
+                      samp_labels=Dict[str, str],
+                      samp_pair_key_str='{}-{}',
+                      show_fig=False):
+    """
+    Produces set of HTMLs applying scores_scatter_plotly using a table, but I
+    don't really get the format of the input table and need to go back and look
+    at where I originally used this.
+    TODO: how do you use write_plotly_html
+
+    Args:
+        results_table: DF with multiindex columns, (sample, stat). Must include
+            neg_fdr & pos_fdr stat columns
+        xy_key: The stat name (in results_table) that will be used as x/y values
+        samplePairs: All X/Y samples that will have html produced, all pairs by
+            default.
+        gene_set_masks: List of labelling strings and bool masks that indicate
+            subsets of genes that will be plotted separately as small dots within
+            the main points.
+        out_fmt_str: Path to which files will be written, containing one {} to
+            which the comparison will be written.
+        samp_labels: Dictionary of sample labels
+        samp_pair_key_str:
+
+
+    """
+
+    if samplePairs is None:
+        if type(results_table) is pd.DataFrame:
+            samps = results_table.columns.levels[0]
+        else:
+            samps = results_table.keys()
+        samplePairs = itertools.permutations(samps, 2)
+
+    for rsamp, psamp in samplePairs:
+
+        smpk = samp_pair_key_str.format(rsamp, psamp)
+
+        Xall, Yall = results_table[smpk][xy_key]
+
+        enr, dep = [results_table[smpk][pk] for pk in ('pos_fdr', 'neg_fdr')]
+
+        # get the lowest fdr for hovertext
+        fdr_lowest = enr.copy()
+        # wherever dep is smaller, overwrite the enr fdr value
+        m = dep < enr
+        fdr_lowest[m] = dep[m]
+
+        axis_labels = [samp_labels[s] if samp_labels else s for s in (rsamp, psamp)]
+
+        fig = scores_scatter_plotly(Xall, Yall, fdr_lowest, fdr_thresholds, fdr_colours, gene_set_masks)
+
+        # comp = f"{rsamp}-{psamp}"
+        if out_fmt_str:
+            fn = out_fmt_str.format(rsamp, psamp)
+            fig.write_html(
+                fn,
+                include_plotlyjs='directory',
+            )
+        if show_fig:
+            fig.show()
+
+
+def plot_rank_vs_score(score:pd.Series, sig:pd.Series, n_labels, sig_threshold=0.05, step=0.015):
+    """Score is the thing they will be ranked on,
+    sig series is just used for drawing the significance line
+    todo: make sig optional."""
+
+    def get_rank_of_thresholds(score, sig, threshold=0.05):
+
+        # first dropouts, then enrichments
+        threshold_yvalue = []
+        for endmask in (score < 0), (score > 0):
+            yend = sig.loc[endmask]
+            thresh_rank = (yend < threshold).sum()
+            threshold_yvalue.append(
+                score.loc[endmask].abs().sort_values(ascending=False).iloc[thresh_rank]
+            )
+
+        threshold_yvalue[0] = -threshold_yvalue[0]
+        return threshold_yvalue
+
+    plt.figure(figsize=(7, 10))
+    #tab = res_drugz[k]
+    normz_rank = score.rank()
+    plt.scatter(normz_rank, score)
+    low, hi = get_rank_of_thresholds(score, sig, sig_threshold)
+    for thresh in (low, hi):
+        plt.plot([0, score.shape[0]], [thresh, thresh], 'k--', alpha=0.6)
+        plt.text(score.shape[0] / 2, thresh + 0.1, f'{sig_threshold * 100}% FDR')
+
+    for isneg, endmask in (True, (score < 0)), (False, (score > 0)):
+        ax = plt.gca()
+        axis_to_data = (ax.transAxes + ax.transData.inverted()).transform
+        scoreend = score.loc[endmask]
+
+        top_genes = scoreend.loc[(sig.loc[endmask] < sig_threshold)].abs().sort_values(ascending=False).head(n_labels).index
+        try:
+            extreme_value = scoreend.loc[top_genes[0]]
+        except IndexError:
+            continue
+
+        for gi, gn in enumerate(top_genes):
+            x = normz_rank[gn]
+            y = score[gn]
+
+
+            if isneg:
+                text_x, text_y = axis_to_data([0.25, 0.05 + gi * step])
+                alignment = 'left'
+
+            else:
+                text_x, text_y = axis_to_data([0.75, 1 - (gi * step)])
+                alignment = 'right'
+
+            plt.text(
+                text_x, text_y, gn,
+                fontsize=9,
+                bbox={'facecolor': 'white', 'alpha': 1, 'pad': 0.1},
+                ha=alignment,
+            )
+            plt.plot([x + 50, text_x, ], [y, text_y], 'k-')
 
