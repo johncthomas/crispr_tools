@@ -599,9 +599,6 @@ def plot_req_inf(counts, reps, qrange=(0.01,0.1), moi=0.2):
     plt.legend(title='X (guide rep)')
 
 
-
-
-
 def load_analyses_via_expd(expd_or_yaml:Union[Dict, PathType],
                            results_types:Union[str, List[str]]='infer',
                            use_attrdict=True) -> Dict[str, Dict[str, pd.DataFrame]]:
@@ -611,13 +608,15 @@ def load_analyses_via_expd(expd_or_yaml:Union[Dict, PathType],
     list of str giving results types can be given.
 
     Returned results will be keyed by results_type then control group"""
+
     if type(expd_or_yaml) != dict:
         with open(expd_or_yaml) as f:
             expd_or_yaml = yaml.safe_load(f)
 
     expd = expd_or_yaml
 
-
+    #todo support DrugZ.
+    #  analyses should be classes that are global and have tabulate method attached
     supported_analyses = ['jacks', 'mageck']
     # TODO consistent file name for results tables
     suffixes = dict(zip(supported_analyses, ['jacks_scores', 'mageck_table']))
@@ -628,7 +627,7 @@ def load_analyses_via_expd(expd_or_yaml:Union[Dict, PathType],
             if not expd[f"skip_{rt}"]:
                 results_types.append(rt)
 
-    LocalDict = {}
+    LocalDict = dict
     if use_attrdict:
         LocalDict = AttrDict
     all_results = LocalDict()
@@ -643,6 +642,7 @@ def load_analyses_via_expd(expd_or_yaml:Union[Dict, PathType],
         return AttrDict(all_results)
     return all_results
 
+
 def select_clonal_lfc_by_samp(control_samp, treat_samp, lfcs, sample_reps,):
     #todo make a ClonalLFC object with this as a method
 
@@ -654,7 +654,6 @@ def select_clonal_lfc_by_samp(control_samp, treat_samp, lfcs, sample_reps,):
                              for i, reps in ((0, ctrl_reps), (1, treat_reps))]
 
     return lfcs.loc[:, ctrl_mask.values & treat_mask.values]
-
 
 
 def get_clonal_lfcs(lncounts, ctrl_dict:dict, sample_reps:dict,
@@ -683,108 +682,107 @@ def get_clonal_lfcs(lncounts, ctrl_dict:dict, sample_reps:dict,
     return pd.DataFrame(_lfcs)
 
 
-def write_results_excel(results:Dict[str, pd.DataFrame],
-                        filename,
-                        score_name='',
-                        stat_labels:Dict[str, str]=None):
-    """Write the results from a single analysis to an Excel file.
-    By default columns fdr, fdr_log10, neg_p, pos_p are included.
-    Args:
-        results: A dict of DataFrames. The keys will be used to name the sheets
-        filename: name of the file that will be written
-        score_name: 'lfc' or 'jacks_score' depending on what was used. Use
-            stat_labels for anything else.
-        stat_labels: Custom columns can be included in the output by passing a
-            dictionary with dataframe_label:output_label mapped. You'll
-            need to include every stat of interest.
-    """
-    # todo instead of worksheets with comps, write each comp to its own worksheet
-    #   should probably be optional. Would drop the top row which is good.
-
-    import xlsxwriter
-
-    if not score_name and stat_labels is None:
-        RuntimeWarning('No score key included')
-
-    if not filename.endswith('.xlsx'):
-        filename += '.xlsx'
-    workbook = xlsxwriter.Workbook(filename)
-
-    for sheetname, tab in results.items():
-        tab = tab.copy()
-        # ** rename the stats columns **
-        #    this could be in a separate function...
-
-        tab.index.name = 'Gene'
-        # get the score label for common scores
-        score_lab = {'lfc':'Log2(FC)', 'jacks_score':'JACKS score', '':''}[score_name]
-
-        if stat_labels:
-            good_stats = stat_labels
-        else:
-            good_stats = dict(
-                zip(['fdr', 'fdr_log10', score_name, 'neg_p', 'pos_p'],
-                    ['FDR', '–Log10(FDR)', score_lab, 'Dropout p-value', 'Enrichment p-value'])
-            )
-
-        # orginally wrote this to work with multiindex columns, but also
-        if hasattr(tab.columns, 'levels'):
-            # get the new name for favoured stats, and record those to be removed
-            new_level = []
-            dump_stats = []
-            for c in tab.columns.levels[1]:
-                try:
-                    new_level.append(good_stats[c])
-                except KeyError:
-                    new_level.append(c)
-                    dump_stats.append(c)
-
-            # change the labels of the ones we care for
-            tab.columns.set_levels(new_level, 1, inplace=True)
-            # drop the values from the table, does not effect the index
-            tab.drop(dump_stats, 1, level=1, inplace=True)
-
-            # generate a new multiindex
-            new_multiindex = []
-            for col in tab.columns:
-                if col[1] not in dump_stats:
-                    new_multiindex.append(col)
-
-            tab.columns = pd.MultiIndex.from_tuples(new_multiindex)
-
-
-        # ** Write the worksheet **
-        sheet = workbook.add_worksheet(name=sheetname)
-
-        index_format = workbook.add_format({'bold': True, 'num_format': '@', 'align': 'right'})
-        header_format = workbook.add_format({'bold': True, 'num_format': '@', 'align': 'center'})
-        num_format = workbook.add_format({'num_format': '0.00'})
-
-        # do the cell merge, we're gonna use the length of levels[1] to figure out the merge range
-        n_to_merge = len(tab.columns.levels[1])
-        samples = tab.columns.levels[0]
-
-        for samp_i, samp in enumerate(samples):
-            # row, col, row, col
-            sheet.merge_range(0, 1 + samp_i * n_to_merge, 0, 0 + (samp_i + 1) * n_to_merge, samp, header_format)
-
-        # write the index header
-        sheet.write(0, 0, 'Gene')
-
-        # write the stats headers
-        for coli, (c1, c2) in enumerate(tab.columns):
-            # c1 gets wrote using merge, above
-            sheet.write(1, coli + 1, c2, index_format)
-
-        for row_i, gene in enumerate(tab.index):
-            sheet.write(2 + row_i, 0, gene, index_format)
-
-        for col_i, col in enumerate(tab):
-            for row_i, val in enumerate(tab[col]):
-                if not np.isnan(val):
-                    sheet.write(row_i + 2, col_i + 1, val, num_format)
-
-    workbook.close()
+### WARNING: This completely fucks things up sometimes, do not uncomment unless you're debugging
+# def write_results_excel(results:Dict[str, pd.DataFrame],
+#                         filename,
+#                         score_name='',
+#                         stat_labels:Dict[str, str]=None):
+#     """Write the results from a single analysis to an Excel file.
+#     By default columns fdr, fdr_log10, neg_p, pos_p are included.
+#     Args:
+#         results: A dict of DataFrames. The keys will be used to name the sheets
+#         filename: name of the file that will be written
+#         score_name: 'lfc' or 'jacks_score' depending on what was used. Use
+#             stat_labels for anything else.
+#         stat_labels: Custom columns can be included in the output by passing a
+#             dictionary with dataframe_label:output_label mapped. You'll
+#             need to include every stat of interest.
+#     """
+#
+#     import xlsxwriter
+#
+#     if not score_name and stat_labels is None:
+#         RuntimeWarning('No score key included')
+#
+#     if not filename.endswith('.xlsx'):
+#         filename += '.xlsx'
+#     workbook = xlsxwriter.Workbook(filename)
+#
+#     for sheetname, tab in results.items():
+#         tab = tab.copy()
+#         # ** rename the stats columns **
+#         #    this could be in a separate function...
+#
+#         tab.index.name = 'Gene'
+#         # get the score label for common scores
+#         score_lab = {'lfc':'Log2(FC)', 'jacks_score':'JACKS score', '':''}[score_name]
+#
+#         if stat_labels:
+#             good_stats = stat_labels
+#         else:
+#             good_stats = dict(
+#                 zip(['fdr', 'fdr_log10', score_name, 'neg_p', 'pos_p'],
+#                     ['FDR', '–Log10(FDR)', score_lab, 'Dropout p-value', 'Enrichment p-value'])
+#             )
+#
+#         # orginally wrote this to work with multiindex columns, but also
+#         if hasattr(tab.columns, 'levels'):
+#             # get the new name for favoured stats, and record those to be removed
+#             new_level = []
+#             dump_stats = []
+#             for c in tab.columns.levels[1]:
+#                 try:
+#                     new_level.append(good_stats[c])
+#                 except KeyError:
+#                     new_level.append(c)
+#                     dump_stats.append(c)
+#
+#             # change the labels of the ones we care for
+#             tab.columns.set_levels(new_level, 1, inplace=True)
+#             # drop the values from the table, does not effect the index
+#             tab.drop(dump_stats, 1, level=1, inplace=True)
+#
+#             # generate a new multiindex
+#             new_multiindex = []
+#             for col in tab.columns:
+#                 if col[1] not in dump_stats:
+#                     new_multiindex.append(col)
+#
+#             tab.columns = pd.MultiIndex.from_tuples(new_multiindex)
+#
+#
+#         # ** Write the worksheet **
+#         sheet = workbook.add_worksheet(name=sheetname)
+#
+#         index_format = workbook.add_format({'bold': True, 'num_format': '@', 'align': 'right'})
+#         header_format = workbook.add_format({'bold': True, 'num_format': '@', 'align': 'center'})
+#         num_format = workbook.add_format({'num_format': '0.00'})
+#
+#         # do the cell merge, we're gonna use the length of levels[1] to figure out the merge range
+#         n_to_merge = len(tab.columns.levels[1])
+#         samples = tab.columns.levels[0]
+#
+#         for samp_i, samp in enumerate(samples):
+#             # row, col, row, col
+#             sheet.merge_range(0, 1 + samp_i * n_to_merge, 0, 0 + (samp_i + 1) * n_to_merge, samp, header_format)
+#
+#         # write the index header
+#         sheet.write(0, 0, 'Gene')
+#
+#         # write the stats headers
+#         for coli, (c1, c2) in enumerate(tab.columns):
+#             # c1 gets wrote using merge, above
+#             sheet.write(1, coli + 1, c2, index_format)
+#
+#         for row_i, gene in enumerate(tab.index):
+#             sheet.write(2 + row_i, 0, gene, index_format)
+#
+#         for col_i, col in enumerate(tab):
+#             for row_i, val in enumerate(tab[col]):
+#                 if not np.isnan(val):
+#                     sheet.write(row_i + 2, col_i + 1, val, num_format)
+#
+#     workbook.close()
 
 
 def write_stats_workbook(sheets: Dict[str, pd.DataFrame], filename=None,
