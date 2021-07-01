@@ -6,12 +6,7 @@ import gzip
 import argparse
 from pathlib import Path, PosixPath, WindowsPath
 from typing import Union, Tuple, List, Dict
-try:
-    from Levenshtein import distance as levendist
-except ImportError:
-    print('Levenshtein package not present, fuzzy matching not available')
-    def levendist():
-        raise ModuleNotFoundError('Levenshtein package not installed')
+
 from typing import List
 import multiprocessing
 from functools import partial
@@ -27,7 +22,8 @@ It's probably not very useful if either of these things are false.
 Produces dereplicated sequence counts (one file per sample) and then a single
 file containing reads mapped to guide/gene from a library file."""
 
-__version__ = '1.5.1'
+__version__ = '1.6.0'
+# 1.6.0 removed fuzzy counting
 # 1.5.1 removed some unneccesary print calls
 # 1.5.0 added support for FastA
 # 1.4.1 efficiency when merging the files in map_reads
@@ -137,24 +133,6 @@ def count_reads(fn, slicer=(None, None), s_len=None, s_offset=0, file_format='in
         print(failed_count, 'sequences did not contain subsequence')
     return seqs_count
 
-
-def fuzzy_match(query_seq, lib_seqs, max_dist=3):
-    """Check that exactly one library sequence is sufficiently close
-    to the given sequence.
-    If so, return the library sequence that is close,
-    otherwise return None."""
-
-    closeness = lib_seqs.map(lambda x: levendist(x, query_seq))
-    # check the closest seq(s) are sufficiently close
-    if min(closeness) > max_dist:
-        return None
-    # check only one is close enough
-    close_mask = closeness == min(closeness)
-    if sum(close_mask) == 1:
-        return lib_seqs.loc[close_mask].values[0]
-    else:
-        # explicitly...
-        return None
 
 
 def get_file_list(files_dir) -> List[os.PathLike]:
@@ -346,7 +324,7 @@ def get_count_table_from_file_list(file_list:List[Path], splitter='.raw', remove
 def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
                seqhdr='seq', guidehdr='guide', genehdr='gene',
                drop_unmatched=False, report=False, splitter='.raw',
-               remove_prefix=True, out_fn=None, fuzzy=False, fuzzy_threads=None,
+               remove_prefix=True, out_fn=None,
                ignore_singletons=False) -> pd.DataFrame:
     """
     Map guide sequences in a set of files containing guide sequences and abundance
@@ -369,8 +347,6 @@ def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
             <prefix>.<filename>.split(splitter)[0]
         remove_prefix: drop the prefix from column headers
         out_fn: Write DF to filename, if provided
-        fuzzy: If True use fuzzy matching... Don't set to True
-        fuzzy_threads: ...
         ignore_singletons: Don't attempt to map sequences that only appear
             once in all the rawcount files. Speeds things up, singletons
             represent ~40% of unique sequences but there's only one of them.
@@ -379,8 +355,6 @@ def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
         pd.DataFrame
     """
 
-    if fuzzy and fuzzy_threads is None:
-        fuzzy_threads = multiprocessing.cpu_count() - 1
 
 
     if type(lib) in (str, PosixPath, WindowsPath):
@@ -402,40 +376,7 @@ def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
 
     rawcnt = get_count_table_from_file_list(file_list, splitter, remove_prefix)
 
-    # we should have a table indexed by the sequences
-    if fuzzy:
-        if type(fuzzy) == int:
-            maxdist = fuzzy
-        else:
-            maxdist = 3
-        if ignore_singletons:
-            rawcnt = rawcnt.loc[rawcnt.sum(1) > 1]
 
-        seqs = pd.Series(rawcnt.index, index=rawcnt.index)
-        chunk_sz = seqs.shape[0] // fuzzy_threads
-
-        # asynchronously match
-        fz_results = []
-        with multiprocessing.Pool(fuzzy_threads) as pool:
-            for chunkn in range(fuzzy_threads):
-                subseqs = seqs.iloc[chunkn * chunk_sz:(1 + chunkn) * chunk_sz]
-                fz_results.append(
-                    pool.apply_async(
-                        subseqs.apply,
-                        args=(fuzzy_match,),
-                        kwds=dict(
-                            lib_seqs=pd.Series(lib.index),
-                            max_dist=maxdist
-                        )
-                    )
-                )
-
-            for r in fz_results:
-                matched = r.get().dropna()
-                rawcnt.loc[matched.index, 'fuzzy'] = matched
-
-            rawcnt = rawcnt.groupby('fuzzy').sum()
-            rawcnt.index.name = 'seq'
 
     # the absent guides
     missing = lib.loc[~lib.index.isin(rawcnt.index), :].index
@@ -516,11 +457,7 @@ if __name__ == '__main__':
     parser.add_argument('--library', default=None, metavar='LIB_PATH',
                         help="Pass a library file and a single mapped reads count file will be output with" \
                              "the name [FN_PREFIX].counts.tsv")
-    parser.add_argument('--fuzzy-matching', type=int, default=False, metavar='N',
-                        help='Count sequences with up to N differences from the library (excludes ambiguous reads' \
-                        'that fuzzily match multiple lib seqs)')
-    parser.add_argument('--cpus', type=int, default=cpus, help="Number of processes when doing fuzzy matching. "\
-                        "Default set to what's available or 10, whichever's lower.")
+
     parser.add_argument('--file_type', metavar='FILE_TYPE', choices={'a', 'q', 'infer'}, default='infer',
                         help='If your files end in something weird, use "a" for fastA or "q" for fastQ. Cant handle mixed file types.'
                         'Can handle .gz. By default its infered by the file names.')
@@ -539,6 +476,5 @@ if __name__ == '__main__':
 
     if clargs.library:
         map_counts(written_fn, clargs.library, drop_unmatched=True, report=True, remove_prefix=True,
-                out_fn=clargs.p+'.counts.tsv', splitter=clargs.suffix,
-                   fuzzy=clargs.fuzzy_matching, fuzzy_threads=clargs.cpus)
+                out_fn=clargs.p+'.counts.tsv', splitter=clargs.suffix,)
 
