@@ -241,14 +241,19 @@ def plot_read_violins(tab, samp_per_row='all', column_labs=None, log=True, size_
 
     for rowi, ax in enumerate(axes):
         inds = slice(rowi * samp_per_row, (1 + rowi) * samp_per_row)
-        stab = tab.iloc[:, inds].T
+        stab = tab.iloc[:, inds]
+
         # this is poo
         if stab.shape[0] == 0:
             break
         ax.violinplot(stab, widths=0.8)
         ax.boxplot(stab, widths=0.2)
+
         ax.set_xticks(range(1, samp_per_row + 1))
-        ax.set_xticklabels(column_labs[inds], rotation=40)
+        clabs = list(column_labs[inds])
+        while len(clabs) < samp_per_row:
+            clabs.append('')
+        ax.set_xticklabels(clabs, rotation=40)
     plt.tight_layout()
     if rows == 1:
         return axes[0]
@@ -256,7 +261,7 @@ def plot_read_violins(tab, samp_per_row='all', column_labs=None, log=True, size_
         return axes
 
 def get_ROC_values(series, things_oi):
-    things_oi = things_oi[things_oi.isin(tab.index)]
+    things_oi = things_oi[things_oi.isin(series.index)]
 
     col = series.dropna().sort_values()
     toi = things_oi[things_oi.isin(col.index)]
@@ -442,7 +447,7 @@ def tabulate_mageck(prefix):
     for fn in iter_files_by_prefix(prefix, '.gene_summary.txt'):
 
         #mtab from the mageck output, reformatted into tab
-        mtab = pd.read_csv(prefix.parent / fn, '\t', index_col=0)
+        mtab = pd.read_csv(prefix.parent / fn, sep='\t', index_col=0)
         tab = pd.DataFrame(index=mtab.index)
 
         # keep the pos and neg p values with better names
@@ -489,7 +494,7 @@ def tabulate_drugz(prefix, compjoiner='→'):
     for fn in iter_files_by_prefix(prefix):
         comp = fn[len(prefix.parts[-1]):-4].replace('-', compjoiner)
 
-        tab = pd.read_csv(os.path.join(os.path.split(prefix)[0], fn), '\t', index_col=0)
+        tab = pd.read_csv(os.path.join(os.path.split(prefix)[0], fn), sep='\t', index_col=0)
 
         # sort out the column names to be consistent with other results tables
         tab.index.name = 'gene'
@@ -1068,3 +1073,11 @@ def plot_rank_vs_score(score:pd.Series, sig:pd.Series, n_labels, sig_threshold=0
             )
             plt.plot([x + 50, text_x, ], [y, text_y], 'k-')
 
+def load_counts(file_path, index_col='guide', gene_col='gene') -> (pd.DataFrame, pd.Series):
+    """Load count table, putting gene column into separate Series and dropping it
+    from counts. Returns (cnt, guide_gene)
+    """
+    cnt = pd.read_csv(file_path, sep='\t', index_col=index_col)
+    guide_gene = cnt[gene_col]
+    cnt.drop(gene_col, 1, inplace=True)
+    return cnt, guide_gene
