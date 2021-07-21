@@ -21,6 +21,8 @@ import pprint
 
 try:
     from jacks.jacks_io import runJACKS
+    from jacks.infer import LOG as jacksLOG
+    jacksLOG.setLevel(logging.WARNING)
 except ImportError:
     print('To run jacks you need to install JACKS,\n', 'https://github.com/felicityallen/JACKS/tree/master/jacks\n' 
           "You can still run Mageck though, if it's installed.")
@@ -40,9 +42,6 @@ class ConfigurationError(Exception):
 
 pipeLOG = logging.getLogger('pipeline')
 pipeLOG.setLevel(logging.INFO)
-
-from jacks.infer import LOG as jacksLOG
-jacksLOG.setLevel(logging.WARNING)
 logging.getLogger('matplotlib').setLevel(logging.WARNING)
 
 #from crispr_tools.count_reads import count_reads, count_batch, map_counts
@@ -116,7 +115,10 @@ def set_logger(log_fn):
     # hndlr.setLevel(logging.INFO)
     pipeLOG.setLevel(logging.INFO)
     pipeLOG.addHandler(hndlr)
-    jacksLOG.addHandler(hndlr)
+    try:
+        jacksLOG.addHandler(hndlr)
+    except:
+        pass
     #mageckLOG.addHandler(hndlr)
 
 
@@ -555,7 +557,7 @@ def process_control_map(controls, samples):
                 samps = [samps]
             # if you add keywords you'll need to add them to the database add_data module
             if samps == ['ALL']:
-                samps = copy(list(samples))
+                samps = [s for s in samples if s!=ctrl]
             elif type(samps) == dict:
                 # maybe could have other keywords in the future
                 samps = [s for s in samples if s not in samps['EXCEPT']]
@@ -601,12 +603,11 @@ def process_arguments(arguments:dict):
             for k, v in comp.items():
                 if type(v) == str:
                     comp[k] = [v]
-
     if 'sample_reps' in arguments:
         for k, v in arguments['sample_reps'].items():
             if type(v) == str:
                 arguments['sample_reps'][k] = [v]
-    #print('asklfjd', arguments['sample_reps'])
+
     reps_list = []
     [reps_list.extend(r) for r in arguments['sample_reps'].values()]
 
@@ -703,7 +704,6 @@ if __name__ == '__main__':
 
     # generate outdir from exp_name and analysis_name
     if "outdir" not in yml_args:
-
         yml_args["outdir"] = os.path.join(yml_args["exp_name"],  yml_args["analysis_name"])
 
 
@@ -717,8 +717,6 @@ if __name__ == '__main__':
     #print(args)
 
     run_analysis(**args)
-
-
 
 
     # run_analysis(**vars(clargs))
