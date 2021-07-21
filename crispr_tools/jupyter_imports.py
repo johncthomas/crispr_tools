@@ -21,14 +21,26 @@ import logging
 pltlogger = logging.getLogger('matplotlib')
 pltlogger.setLevel(logging.WARNING)
 
-from crispr_tools.tools import get_clonal_lfcs
-from crispr_tools import *
-from IPython.display import display
-from jacks.jacks_io import runJACKS
-import jacks
-jacks.jacks_io.LOG.setLevel(logging.WARNING)
 
-from .tools import hart_list, load_analyses_via_expd, write_stats_workbook, write_results_excel
+from crispr_tools import tools, jacks_tools, crispr_pipeline, drugz
+from IPython.display import display
+
+try:
+    from jacks.jacks_io import runJACKS
+    import jacks
+    jacks.jacks_io.LOG.setLevel(logging.WARNING)
+except:
+    pass
+
+from .tools import (
+    hart_list,
+    load_analyses_via_expd,
+    write_stats_workbook,
+    get_clonal_lfcs,
+    load_counts,
+    plot_read_violins,
+    pca_grid
+)
 
 from sklearn.metrics import precision_recall_curve
 from sklearn.decomposition import PCA
@@ -44,7 +56,8 @@ is_olfactory = lambda x: x.startswith("OR") and x[2].isnumeric()
 comp_name = platform.node()
 if comp_name == 'POS':
     DROPBOX = '/mnt/d/Dropbox/'
-elif 'gurdon' in comp_name or comp_name == 'JTs-iMac' or comp_name == 'JCThomass-MacBook-Pro.local':
+elif platform.system() == 'Darwin':
+    # Darwin is apparently the name of the mac OS
     DROPBOX = '/Users/johnc.thomas/Dropbox/'
 else:
     DROPBOX = '/usr/johnc.thomas/Dropbox/'
