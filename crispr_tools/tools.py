@@ -522,12 +522,14 @@ def tabulate_drugz(prefix, compjoiner='→'):
 
 def pca_grid(pca, hue_deet, style_deet, max_components=5, also_return_fig=False):
     """Plot components against each other in a grid of scatter plots.
+    Deets MUST be in the same order as the columns used for the PCA.
     Args:
         pca: a sklearn.decomposition.PCA() object that has been fit
         hue_deet: grouping variables used for setting colours, by sample
         style_deet: as hue_deet but marker style
         max_components: components to plot, max_comp*(max_comp-1) scatter plots will be produced
         also_return_fig: When false only axes are returned, set to true to also return the Figures"""
+
     thing = sns.scatterplot(pca.components_[0], pca.components_[0],
                             hue=hue_deet, style=style_deet,
                             s=150)
@@ -1081,3 +1083,11 @@ def load_counts(file_path, index_col='guide', gene_col='gene') -> (pd.DataFrame,
     guide_gene = cnt[gene_col]
     cnt.drop(gene_col, 1, inplace=True)
     return cnt, guide_gene
+
+def load_replicate_sample_details(xlsx) -> (pd.DataFrame, pd.DataFrame):
+    """From a screen details Excel file (sheet='Sample details), return DFs
+    containg replicate and sample details"""
+    rep_deets = pd.read_excel(xlsx, sheet_name='Sample details', )
+    rep_deets = rep_deets.set_index('Sequence name', drop=False)
+    samp_deets = rep_deets.drop_duplicates('Sample').set_index('Sample', drop=False).drop(['Replicate', 'Sequence name'], 1)
+    return rep_deets, samp_deets
