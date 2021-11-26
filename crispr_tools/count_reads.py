@@ -348,9 +348,8 @@ def get_count_table_from_file_list(file_list:List[Path], splitter='.raw', remove
 
 def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
                seqhdr='seq', guidehdr='guide', genehdr='gene',
-               drop_unmatched=False, report=False, splitter='.raw',
-               remove_prefix=True, out_fn=None,
-               ignore_singletons=False) -> pd.DataFrame:
+               report=False, splitter='.raw',
+               remove_prefix=True, out_fn=None,) -> pd.DataFrame:
     """
     Map guide sequences in a set of files containing guide sequences and abundance
     using a library file.
@@ -361,20 +360,16 @@ def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
     Args:
         fn_or_dir: Directory, or list of directories/files from which rawcount
             files will be processed.
-        lib: library file or DF containing the guide sequences and guide
+        lib: library file or DF containing the guide sequences and guide.
+            If DF all 3 columns must be present (index is ignored).
         seqhdr: library column header indicating guide sequences
         guidehdr: library column header indicating guide names
         genehdr: library column header indicating gene names
-        drop_unmatched: When True reads matching no sequence in the library
-            file are dropped.
         report: When True, print stats about the mapping
         splitter: column headers in output table will be
             <prefix>.<filename>.split(splitter)[0]
         remove_prefix: drop the prefix from column headers
         out_fn: Write DF to filename, if provided
-        ignore_singletons: Don't attempt to map sequences that only appear
-            once in all the rawcount files. Speeds things up, singletons
-            represent ~40% of unique sequences but there's only one of them.
 
     Returns:
         pd.DataFrame
@@ -391,7 +386,7 @@ def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
             lib.set_index(seqhdr, drop=False, inplace=True)
         else:
             lib.set_index(lib.columns[0])
-    # else the library should be in a useable form.
+    # else the library should already be in a useable form.
 
     # write a single table
     file_list = get_file_list(fn_or_dir)
@@ -399,38 +394,18 @@ def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
 
     rawcnt = get_count_table_from_file_list(file_list, splitter, remove_prefix)
 
+    cnt = rawcnt.reindex(lib[seqhdr], fill_value=0)
+    cnt.index = lib[guidehdr]
 
-
-    # the absent guides
-    missing = lib.loc[~lib.index.isin(rawcnt.index), :].index
-
-    # get the present guides
-    matches = rawcnt.loc[rawcnt.index.isin(lib.index), :].index
     if report:
-        prop = rawcnt.loc[matches, :].sum().sum()/rawcnt.sum().sum()
+        prop = cnt.sum().sum()/rawcnt.sum().sum()
         LOG.info("{:.3}% of reads map.".format(prop*100))
+        no_hits = (cnt == 0).all(1).sum()
         LOG.info("{:.3}% ({}) of library guides not found.".format(
-            missing.shape[0] / lib.shape[0] *100, missing.shape[0]
+            no_hits/cnt.shape[0], no_hits
         ))
-    #cnt = rawcnt.loc[matches, :].copy()
-    rawcnt.loc[matches, 'guide'] = lib.loc[matches, guidehdr]
-    rawcnt.loc[matches, 'gene'] = lib.loc[matches, genehdr]
 
-    missingdf = pd.DataFrame(index=missing, columns=rawcnt.columns)
-    missingdf.loc[:, :] = 0
-    missingdf.loc[missing, 'guide'] = lib.loc[missing, guidehdr]
-    missingdf.loc[missing, 'gene'] = lib.loc[missing, genehdr]
-    rawcnt = rawcnt.append(missingdf)
-
-    if drop_unmatched:
-        cnt = rawcnt.loc[lib.index, :].copy()
-    else:
-        cnt = rawcnt
-
-    # sort out columns
-    cols = list(cnt.columns)
-    cnt = cnt.reindex([guidehdr, genehdr] + cols[:-2], axis='columns',)
-    cnt.set_index(guidehdr, inplace=True)
+    cnt.insert(0, 'gene', lib[genehdr])
 
     if out_fn:
         cnt.to_csv(out_fn, sep='\t')
