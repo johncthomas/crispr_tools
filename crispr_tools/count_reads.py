@@ -6,12 +6,21 @@ import gzip
 import argparse
 from pathlib import Path, PosixPath, WindowsPath
 from typing import Union, Tuple, List, Dict
-
+import datetime
 from typing import List
 import multiprocessing
 from functools import partial
 # make it easy to find print statements used for debugging
 debugprint = print
+
+import logging
+LOG = logging.getLogger(__name__, )
+LOG.setLevel(logging.INFO) # need to set the logger to the lowest level...
+log_formatter = logging.Formatter('%(message)s')
+stream_handler = logging.StreamHandler()
+stream_handler.setLevel(logging.INFO)
+stream_handler.setFormatter(log_formatter)
+LOG.addHandler(stream_handler)
 
 """Functions for counting and mapping reads from multiple FASTQ files
 to some kind of sequence library, e.g. a CRISPR guide library. 
@@ -22,7 +31,8 @@ It's probably not very useful if either of these things are false.
 Produces dereplicated sequence counts (one file per sample) and then a single
 file containing reads mapped to guide/gene from a library file."""
 
-__version__ = '1.6.0'
+__version__ = '1.7.0'
+# 1.7.0 adding permenant logging
 # 1.6.0 removed fuzzy counting
 # 1.5.1 removed some unneccesary print calls
 # 1.5.0 added support for FastA
@@ -50,6 +60,7 @@ __version__ = '1.6.0'
 #todo check library seq len and file seq len match.
 #todo order reps by
 
+
 FILE_FMT = {'a':['.fna', '.fasta', '.fna.gz', '.fasta.gz'],
               'q': ('.fastq', '.fastq.gz', '.fq', '.fq.gz')}
 
@@ -59,11 +70,14 @@ for fmt in FILE_FMT.values():
 
 
 def read_fastq(file_obj):
+    """assumes the 2nd line, and every 4th thereafter, is sequence"""
+    pos = 3
     for line in file_obj:
-        if line[0] == '@':
-            s = file_obj.__next__()
-            s = s.replace('\n', '')
-            yield s
+        if pos == 4:
+            pos = 0
+            yield  line.strip()
+        pos += 1
+
 
 def read_fasta(file_obj):
 
@@ -114,7 +128,6 @@ def count_reads(fn, slicer=(None, None), s_len=None, s_offset=0, file_format='in
 
     # parse out the sequences from the FastQ
     for s in reader:
-
         # get the relevant part of the sequence
         if s_len is None:
             s = s[chop]
@@ -128,9 +141,9 @@ def count_reads(fn, slicer=(None, None), s_len=None, s_offset=0, file_format='in
 
         seqs_count[s] += 1
     f.close()
-    print(fn, len(seqs_count), 'unique sequences, ', sum(seqs_count.values()), 'reads')
+    LOG.info(f"{fn} {len(seqs_count)} unique sequences, {sum(seqs_count.values())} reads")
     if s_len is not None:
-        print(failed_count, 'sequences did not contain subsequence')
+        LOG.info(f"{failed_count} sequences did not contain subsequence")
     return seqs_count
 
 
@@ -141,9 +154,9 @@ def get_file_list(files_dir) -> List[os.PathLike]:
     added to the file list.
 
     A list of Path obj are returned."""
-
+    LOG.debug(f'get_file_list in: {files_dir}')
     file_list = []
-    # just in case trying to make a list of a single string...
+    # We want a list, not single string
     if type(files_dir) in (str, PosixPath, WindowsPath):
         files_dir = [files_dir]
     # convert to Path
@@ -160,13 +173,13 @@ def get_file_list(files_dir) -> List[os.PathLike]:
         else:
             file_list.append(fndir)
     file_list = [fn for fn in file_list if fn.name[0] != '.']
-    #print(file_list)
+    LOG.debug(f"get_file_list out: {file_list}")
     return file_list
 
 
 def count_batch(fn_or_dir, slicer, fn_prefix='', seq_len=None, seq_offset=0, fn_suffix='.rawcount',
                 fn_split='_R1_', merge_samples=False, just_go=False, quiet=False,
-                file_type = 'infer'):
+                file_type = 'infer', no_log_file=True, debug=False):
     """Write a table giving the frequency of all unique sequences from a fastq
     files (or fastq.gz).
 
@@ -205,13 +218,26 @@ def count_batch(fn_or_dir, slicer, fn_prefix='', seq_len=None, seq_offset=0, fn_
             careful not to double count decompressed & compressed files. Bool.
 
         allowed_extensions  ('fastq', 'fastq.gz', '.fq')
+
+        no_log_file:
+            Set to false to prevent a log file from being written
+
+
     """
-    global print
+
     if quiet:
-        print = lambda x: None
-        just_go = True
-    else:
-        print = print
+        stream_handler.setLevel(logging.WARNING)
+    elif debug:
+        stream_handler.setLevel(logging.DEBUG)
+        LOG.setLevel(logging.DEBUG)
+
+    if not no_log_file:
+        t = datetime.datetime.now()
+        ts = t.strftime('%y%m%dh%Hm%Ms%S_%f')[:-2]
+        file_handler = logging.FileHandler(f"{fn_prefix}.logfile.{ts}.txt")
+        file_handler.setLevel(logging.INFO)
+        file_handler.setFormatter(log_formatter)
+        LOG.addHandler(file_handler)
 
     t = os.path.split(fn_prefix)[0]
     t = os.path.expanduser(t)
@@ -224,15 +250,14 @@ def count_batch(fn_or_dir, slicer, fn_prefix='', seq_len=None, seq_offset=0, fn_
     # filter the file list
     # strings are easier to work with at this point
     file_list = [str(f) for f in file_list]
-    #print(file_list)
 
     #banned_files = [any([f.endswith(suf) for suf in allowed_extensions  if f not in file_list]]
     banned_files = [f for f in file_list if not any([f.endswith(suf) for suf in ALL_FMT])]
 
     if file_type == 'infer' and banned_files:
-        print(
-            'WARNING, the following files might not be fastq/a and will cause the pipeline to crash:\n'
-            ', '.join(banned_files)
+        LOG.warning(
+            ('WARNING: The following files might not be fastq/a and will be ignored:\n'+
+            ', '.join(banned_files))
         )
         file_list =  [f for f in file_list if f not in banned_files]
 
@@ -241,14 +266,14 @@ def count_batch(fn_or_dir, slicer, fn_prefix='', seq_len=None, seq_offset=0, fn_
         samples = set([f.split('_L001_')[0].split('/')[-1] for f in file_list if '_L001_' in f])
 
         file_dict = {s:[f for f in file_list if s in f] for s in samples}
-        print('Samples found:',)
+        message_samples = ['Samples found:']
         for k,v in file_dict.items():
-            print(k)
+            message_samples.append(k)
             for f in v:
-                print('\t'+f)
+                message_samples.append('\t'+f)
+        LOG.info('\n'.join(message_samples))
     else:
-        print('input files')
-        print('\n'.join(file_list))
+        LOG.info('input files:\n'+'\n'.join(file_list))
 
     if type(slicer[0]) is int:
         lengthstring = 'Length={}'.format(slicer[1]-slicer[0])
@@ -257,7 +282,7 @@ def count_batch(fn_or_dir, slicer, fn_prefix='', seq_len=None, seq_offset=0, fn_
     if not just_go:
         input(lengthstring+'\nPress enter to go...')
     else:
-        print(lengthstring, '\n')
+        LOG.info(lengthstring, '\n')
 
     # called in the main loop
     def write_count(a_cnt, fn_base):
@@ -278,7 +303,7 @@ def count_batch(fn_or_dir, slicer, fn_prefix='', seq_len=None, seq_offset=0, fn_
 
     # main loop(s)
     if merge_samples:
-        #debugprint(file_dict)
+        LOG.debug(str(file_dict))
         for samp, fn_or_dir in file_dict.items():
             cnt = Counter()
             for fn in fn_or_dir:
@@ -287,7 +312,7 @@ def count_batch(fn_or_dir, slicer, fn_prefix='', seq_len=None, seq_offset=0, fn_
                 write_count(cnt, samp)
             )
     else:
-        #debugprint(file_list)
+        LOG.debug(str(file_list))
         for fn in file_list:
             cnt = count_reads(fn, slicer, seq_len, seq_offset, file_type)
             out_files.append(
@@ -314,10 +339,10 @@ def get_count_table_from_file_list(file_list:List[Path], splitter='.raw', remove
         sn = fn.name.split(splitter)[0]
         if remove_prefix:
             sn = sn.split('.')[1]
-        print('sample header:', sn)
+        #LOG.info(f'sample header: {sn}')
         rawcnt[sn] = pd.read_csv(fn, index_col=0, header=None, sep='\t')[1]
         # rawcnt = pd.concat([rawcnt, samp], 1)
-
+    LOG.info(f'sample headers: {list(rawcnt.keys())}')
     return pd.DataFrame(rawcnt).fillna(0).astype(int)
 
 
@@ -355,8 +380,6 @@ def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
         pd.DataFrame
     """
 
-
-
     if type(lib) in (str, PosixPath, WindowsPath):
         lib = str(lib)
         if lib.endswith('.csv'):
@@ -385,8 +408,8 @@ def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
     matches = rawcnt.loc[rawcnt.index.isin(lib.index), :].index
     if report:
         prop = rawcnt.loc[matches, :].sum().sum()/rawcnt.sum().sum()
-        print("{:.3}% of reads map.".format(prop*100))
-        print("{:.3}% ({}) of library guides not found.".format(
+        LOG.info("{:.3}% of reads map.".format(prop*100))
+        LOG.info("{:.3}% ({}) of library guides not found.".format(
             missing.shape[0] / lib.shape[0] *100, missing.shape[0]
         ))
     #cnt = rawcnt.loc[matches, :].copy()
@@ -413,10 +436,6 @@ def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
         cnt.to_csv(out_fn, sep='\t')
     return cnt
 
-
-
-
-
 # os.chdir('/Users/johnc.thomas/thecluster/jct61/counts/nomask')
 # map_counts(
 #     'tst', '/Users/johnc.thomas/thecluster/jct61/crispr_libraries/Kinase_gRNA_library_no_duplicates.csv',
@@ -424,11 +443,6 @@ def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
 #
 # )
 
-
-
-
-class MAIN:
-    pass
 if __name__ == '__main__':
     print('count_reads.py version', __version__)
     cpus = multiprocessing.cpu_count()
@@ -461,6 +475,10 @@ if __name__ == '__main__':
     parser.add_argument('--file_type', metavar='FILE_TYPE', choices={'a', 'q', 'infer'}, default='infer',
                         help='If your files end in something weird, use "a" for fastA or "q" for fastQ. Cant handle mixed file types.'
                         'Can handle .gz. By default its infered by the file names.')
+    parser.add_argument('--no-log-file', action='store_true', help='Prevent a log file from being written')
+    parser.add_argument('--debug', action='store_true',
+                        help='Print/log additional debug messages.')
+
     clargs = parser.parse_args()
 
     if clargs.library:
@@ -471,8 +489,17 @@ if __name__ == '__main__':
     # slices list of input files, or dir
     slicer = [int(n) for n in clargs.s.split(',')]
 
-    written_fn = count_batch(clargs.files, slicer, clargs.p, None, 0, clargs.suffix, clargs.fn_split, clargs.merge_samples,
-                clargs.just_go, clargs.quiet,)
+
+    written_fn = count_batch(fn_or_dir=clargs.files,
+                             slicer=slicer,
+                             fn_prefix=clargs.p,
+                             fn_suffix=clargs.suffix,
+                             fn_split=clargs.fn_split,
+                             merge_samples=clargs.merge_samples,
+                             just_go=clargs.just_go,
+                             quiet=clargs.quiet,
+                             no_log_file=clargs.no_log_file,
+                             file_type=clargs.file_type)
 
     if clargs.library:
         map_counts(written_fn, clargs.library, drop_unmatched=True, report=True, remove_prefix=True,
