@@ -375,6 +375,8 @@ def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
         pd.DataFrame
     """
 
+
+
     if type(lib) in (str, PosixPath, WindowsPath):
         lib = str(lib)
         if lib.endswith('.csv'):
@@ -382,15 +384,23 @@ def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
         else:
             sep = '\t'
         lib = pd.read_csv(lib, sep)
-        if seqhdr in lib.columns:
-            lib.set_index(seqhdr, drop=False, inplace=True)
-        else:
-            lib.set_index(lib.columns[0])
+
+    for hdr in (seqhdr, guidehdr, genehdr):
+        if hdr not in lib.columns:
+            raise RuntimeError(
+                f'Library header doesnt match expeted: "{hdr}" not found.\n',
+                f'Library header: {lib.columns}\n',
+                f'Expected headers: seqhdr={seqhdr}, guidehdr={guidehdr}, genehdr={genehdr}'
+            )
+
+    lib.set_index(seqhdr, drop=False, inplace=True)
+
+
     # else the library should already be in a useable form.
 
     # write a single table
     file_list = get_file_list(fn_or_dir)
-    file_list = [f for f in file_list if splitter in str(f)]
+    #file_list = [f for f in file_list if splitter in str(f)]
 
     rawcnt = get_count_table_from_file_list(file_list, splitter, remove_prefix)
 
