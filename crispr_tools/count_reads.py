@@ -282,7 +282,7 @@ def count_batch(fn_or_dir, slicer, fn_prefix='', seq_len=None, seq_offset=0, fn_
     if not just_go:
         input(lengthstring+'\nPress enter to go...')
     else:
-        LOG.info(lengthstring, '\n')
+        LOG.info(lengthstring)
 
     # called in the main loop
     def write_count(a_cnt, fn_base):
@@ -394,6 +394,8 @@ def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
 
     rawcnt = get_count_table_from_file_list(file_list, splitter, remove_prefix)
 
+    # Put the count in the same order as the library, and use the guide names
+    #    as the index as the *should* always be unique
     cnt = rawcnt.reindex(lib[seqhdr], fill_value=0)
     cnt.index = lib[guidehdr]
 
@@ -405,7 +407,8 @@ def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
             no_hits/cnt.shape[0], no_hits
         ))
 
-    cnt.insert(0, 'gene', lib[genehdr])
+    # Add gene column, guide
+    cnt.insert(0, 'gene', lib.set_index(guidehdr)[genehdr])
 
     if out_fn:
         cnt.to_csv(out_fn, sep='\t')
@@ -477,6 +480,6 @@ if __name__ == '__main__':
                              file_type=clargs.file_type)
 
     if clargs.library:
-        map_counts(written_fn, clargs.library, drop_unmatched=True, report=True, remove_prefix=True,
+        map_counts(written_fn, clargs.library, report=True, remove_prefix=True,
                 out_fn=clargs.p+'.counts.tsv', splitter=clargs.suffix,)
 
