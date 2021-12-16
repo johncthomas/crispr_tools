@@ -404,7 +404,7 @@ def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
         LOG.info("{:.3}% of reads map.".format(prop*100))
         no_hits = (cnt == 0).all(1).sum()
         LOG.info("{:.3}% ({}) of library guides not found.".format(
-            no_hits/cnt.shape[0], no_hits
+            no_hits/cnt.shape[0]*100, no_hits
         ))
 
     # Add gene column, guide
