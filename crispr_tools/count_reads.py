@@ -31,7 +31,7 @@ It's probably not very useful if either of these things are false.
 Produces dereplicated sequence counts (one file per sample) and then a single
 file containing reads mapped to guide/gene from a library file."""
 
-__version__ = '1.7.0'
+__version__ = '1.7.1'
 # 1.7.0 adding permenant logging
 # 1.6.0 removed fuzzy counting
 # 1.5.1 removed some unneccesary print calls
