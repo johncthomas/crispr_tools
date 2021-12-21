@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import os, sys
+import os, sys, subprocess
 import pandas as pd
 from collections import Counter
 import gzip
@@ -24,14 +24,16 @@ LOG.addHandler(stream_handler)
 
 """Functions for counting and mapping reads from multiple FASTQ files
 to some kind of sequence library, e.g. a CRISPR guide library. 
-Assumes that FQ filenames are in the format {sample_name}_L???_R1_001.fastq[.gz]
-and that the sequence to be mapped is in the same position in every read.
-It's probably not very useful if either of these things are false.
+Merging counts assumes that FQ filenames are in the format 
+{sample_name}_L???_R1_001.fastq[.gz]
+and that the sequence to be mapped is in the same position in every read
+(including the entire read being the sequence).
 
 Produces dereplicated sequence counts (one file per sample) and then a single
 file containing reads mapped to guide/gene from a library file."""
 
-__version__ = '1.7.1'
+__version__ = '1.8.0'
+# 1.8.0 added back fuzzy matching, more efficiently this time
 # 1.7.0 adding permenant logging
 # 1.6.0 removed fuzzy counting
 # 1.5.1 removed some unneccesary print calls
@@ -82,7 +84,7 @@ def read_fastq(file_obj):
 def read_fasta(file_obj):
 
     while True:
-        # not sure why I have to manually deal with StopIter here and not in read_fastq
+        # not sure why I have to explicitly deal with StopIter here and not in read_fastq
         #   maybe .__next__() works better?
         try:
             line = next(file_obj)
@@ -321,7 +323,8 @@ def count_batch(fn_or_dir, slicer, fn_prefix='', seq_len=None, seq_offset=0, fn_
 
     return out_files
 
-def get_count_table_from_file_list(file_list:List[Path], splitter='.raw', remove_prefix=True) -> pd.DataFrame:
+def get_count_table_from_file_list(file_list:List[Path], splitter='.raw',
+                                   remove_prefix=True) -> pd.DataFrame:
     """Put the contents of a list of raw count filepaths into a DF.
     Args:
         file_list: list of files
@@ -349,7 +352,7 @@ def get_count_table_from_file_list(file_list:List[Path], splitter='.raw', remove
 def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
                seqhdr='seq', guidehdr='guide', genehdr='gene',
                report=False, splitter='.raw',
-               remove_prefix=True, out_fn=None,) -> pd.DataFrame:
+               remove_prefix=True, out_fn=None, allow_mismatch=False) -> pd.DataFrame:
     """
     Map guide sequences in a set of files containing guide sequences and abundance
     using a library file.
@@ -368,14 +371,13 @@ def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
         report: When True, print stats about the mapping
         splitter: column headers in output table will be
             <prefix>.<filename>.split(splitter)[0]
-        remove_prefix: drop the prefix from column headers
+        remove_prefix: If True, <sample_name>.split('.')[1]
         out_fn: Write DF to filename, if provided
+        allow_mismatch: Allow one mismatch when mapping
 
     Returns:
         pd.DataFrame
     """
-
-
 
     if type(lib) in (str, PosixPath, WindowsPath):
         lib = str(lib)
@@ -383,7 +385,7 @@ def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
             sep = ','
         else:
             sep = '\t'
-        lib = pd.read_csv(lib, sep)
+        lib = pd.read_csv(lib, sep=sep)
 
     for hdr in (seqhdr, guidehdr, genehdr):
         if hdr not in lib.columns:
@@ -395,18 +397,60 @@ def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
 
     lib.set_index(seqhdr, drop=False, inplace=True)
 
-
     # else the library should already be in a useable form.
 
     # write a single table
     file_list = get_file_list(fn_or_dir)
-    #file_list = [f for f in file_list if splitter in str(f)]
-
     rawcnt = get_count_table_from_file_list(file_list, splitter, remove_prefix)
 
-    # Put the count in the same order as the library, and use the guide names
-    #    as the index as the *should* always be unique
+    # map the matching counts
     cnt = rawcnt.reindex(lib[seqhdr], fill_value=0)
+
+    if allow_mismatch:
+        # get unmapped sequences
+        m =rawcnt.index.isin(lib[seqhdr])
+        unmapped = rawcnt.loc[~m].index
+
+        # use a Go program to map close seqs quickly
+        # write temp files
+        with open('tmp_unmapped.txt', 'w') as f:
+            f.write('\n'.join(unmapped))
+
+        with open('tmp_libseqs.txt', 'w') as f:
+            f.write('\n'.join(lib[seqhdr]))
+
+        output = subprocess.run(
+            ['/Users/johnc.thomas/Dropbox/golang/src/fuzzymatcher/fuzzyTwoLists',
+             'tmp_unmapped.txt', 'tmp_libseqs.txt', 'tmp.out', '1', '4'],
+            capture_output=True
+        )
+
+        LOG.info(output.stdout.decode())
+
+        # output is in a tab sep list of query->library seq
+        # only containing positive hits
+        now_mapped = {}
+        with open('tmp.out') as f:
+            for line in f:
+                line = line.strip()
+                a, b = line.split('\t')
+                now_mapped[a] = b
+
+        # sum up the abundance of the newly mapped reads
+        raw_now_mapped = rawcnt.loc[now_mapped.keys()]
+        raw_now_mapped.index = raw_now_mapped.index.map(now_mapped)
+        gained_counts = raw_now_mapped.groupby(raw_now_mapped.index).sum()
+
+        # report
+        frac_gained = gained_counts.sum().sum() / cnt.sum().sum()
+        LOG.info(f"Percentage abundance gained by fuzzy matching: {frac_gained:.2%}")
+
+        # add the gained counts, reindexing to deal with duplicate seqs in cnt
+        cnt += gained_counts.reindex(cnt.index, fill_value=0)
+    ## **End of dealing with allow_mismatches**
+
+    # Use the guide names as the index as the *should* always be unique,
+    #   even if the sgRNA are not
     cnt.index = lib[guidehdr]
 
     if report:
@@ -459,7 +503,8 @@ if __name__ == '__main__':
     parser.add_argument('--library', default=None, metavar='LIB_PATH',
                         help="Pass a library file and a single mapped reads count file will be output with" \
                              "the name [FN_PREFIX].counts.tsv")
-
+    parser.add_argument('--allow-mismatch', action='store_true', default=False,
+                        help='Allow one mismatch when mapping reads to library.')
     parser.add_argument('--file_type', metavar='FILE_TYPE', choices={'a', 'q', 'infer'}, default='infer',
                         help='If your files end in something weird, use "a" for fastA or "q" for fastQ. Cant handle mixed file types.'
                         'Can handle .gz. By default its infered by the file names.')
@@ -470,13 +515,13 @@ if __name__ == '__main__':
     clargs = parser.parse_args()
 
     if clargs.library:
-        assert os.path.isfile(clargs.library)
+        if not os.path.isfile(clargs.library):
+            raise RuntimeError(f"Library file not found: {clargs.library}")
 
     assert all([os.path.isfile(f) for f in clargs.files])
 
     # slices list of input files, or dir
     slicer = [int(n) for n in clargs.s.split(',')]
-
 
     written_fn = count_batch(fn_or_dir=clargs.files,
                              slicer=slicer,
@@ -491,5 +536,6 @@ if __name__ == '__main__':
 
     if clargs.library:
         map_counts(written_fn, clargs.library, report=True, remove_prefix=True,
-                out_fn=clargs.p+'.counts.tsv', splitter=clargs.suffix,)
+                out_fn=clargs.p+'.counts.tsv', splitter=clargs.suffix,
+                allow_mismatch=clargs.allow_mismatch)
 
