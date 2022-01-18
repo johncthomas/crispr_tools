@@ -19,7 +19,7 @@ from attrdict import AttrDict
 import statsmodels.api as sm
 OLS = sm.regression.linear_model.OLS
 import xlsxwriter
-
+ARROW = '→'
 #import multiprocessing as mp
 
 hart_list = ['AARS1', 'ABCE1', 'ABCF1', 'ACTB', 'ACTL6A', 'ACTR10', 'ACTR2',
@@ -436,7 +436,7 @@ def iter_files_by_prefix(prefix:Union[str, Path], req_suffix=None):
             continue
         yield fn
 
-def tabulate_mageck(prefix):
+def tabulate_mageck(prefix, compjoiner=ARROW):
     """
     :param prefix: Input file prefix, including path
     :return: pd.DataFrame
@@ -465,7 +465,7 @@ def tabulate_mageck(prefix):
             tab.loc[~pos, tabk] = mtab.loc[~pos, f'neg|{stat}']
             tab.loc[:, f'{tabk}_log10'] = tab[tabk].apply(lambda x: -np.log10(x))
 
-        sampnm = fn.split(prefix.stem)[1].split('.gene_s')[0]
+        sampnm = fn.split(prefix.stem)[1].split('.gene_s')[0].replace('-', compjoiner)
         tables[sampnm] = tab
     if tab is None:
         raise FileNotFoundError('Failed to find any .gene_summary.txt files with prefix '+str(prefix))
@@ -488,11 +488,13 @@ def tabulate_mageck(prefix):
 
     return table
 
-def tabulate_drugz(prefix, compjoiner='→'):
+def tabulate_drugz(prefix, compjoiner=ARROW):
     prefix=Path(prefix)
     tables = {}
     for fn in iter_files_by_prefix(prefix):
-        comp = fn[len(prefix.parts[-1]):-4].replace('-', compjoiner)
+        # crop the fn removing the filename part of the prefix, and the file extension
+        #  this is the comparison
+        comp = fn.split(prefix.stem)[1][:-4].replace('-', compjoiner)
 
         tab = pd.read_csv(os.path.join(os.path.split(prefix)[0], fn), sep='\t', index_col=0)
 
@@ -530,7 +532,7 @@ def pca_grid(pca, hue_deet, style_deet, max_components=5, also_return_fig=False)
         max_components: components to plot, max_comp*(max_comp-1) scatter plots will be produced
         also_return_fig: When false only axes are returned, set to true to also return the Figures"""
 
-    thing = sns.scatterplot(pca.components_[0], pca.components_[0],
+    thing = sns.scatterplot(x=pca.components_[0], y=pca.components_[0],
                             hue=hue_deet, style=style_deet,
                             s=150)
 
@@ -549,7 +551,7 @@ def pca_grid(pca, hue_deet, style_deet, max_components=5, also_return_fig=False)
                 continue
 
             # pc_a/b swapped to get column PC on the x and row PC on the y
-            sns.scatterplot(pca.components_[pc_b], pca.components_[pc_a],
+            sns.scatterplot(x=pca.components_[pc_b], y=pca.components_[pc_a],
                             hue=hue_deet, style=style_deet,
                             s=150, legend=False)
             plt.xlabel(f"PC {pc_b+1} (variance explained: {pca.explained_variance_ratio_[pc_b]*100:.3}%)")
@@ -585,14 +587,18 @@ def write_repmap(sample_reps:Dict[str, list], ctrlmap:Dict[str, list], repmap_fn
             f.write('\t'.join(line) + '\n')
 
 
-def get_req_infection(libcnt, minimum=100, quantile = 0.05):
+def get_req_infection(libcnt, minimum=100, proportion = 0.95):
+    """Find the minimum number of infected cells required to get a specified
+    proportion of guides above a minimum abundance.
+
+    Defaults to 95% of guides with abundance > 100."""
     libcnt = libcnt.sort_values().copy()
-    x = libcnt.quantile(quantile)
+    x = libcnt.quantile(1-proportion)
     if x == 0:
         return np.inf
     return sum(libcnt)/(x/minimum)
 
-def plot_req_inf(counts, reps, qrange=(0.01,0.1), moi=0.2):
+def plot_req_inf(counts, reps, qrange=(0.99,0.90), moi=1):
     plt.figure(figsize=(6, 10))
     for n in reps:
         ys=[]
@@ -689,109 +695,6 @@ def get_clonal_lfcs(lncounts, ctrl_dict:dict, sample_reps:dict,
     return pd.DataFrame(_lfcs)
 
 
-### WARNING: This completely fucks things up sometimes, do not uncomment unless you're debugging
-# def write_results_excel(results:Dict[str, pd.DataFrame],
-#                         filename,
-#                         score_name='',
-#                         stat_labels:Dict[str, str]=None):
-#     """Write the results from a single analysis to an Excel file.
-#     By default columns fdr, fdr_log10, neg_p, pos_p are included.
-#     Args:
-#         results: A dict of DataFrames. The keys will be used to name the sheets
-#         filename: name of the file that will be written
-#         score_name: 'lfc' or 'jacks_score' depending on what was used. Use
-#             stat_labels for anything else.
-#         stat_labels: Custom columns can be included in the output by passing a
-#             dictionary with dataframe_label:output_label mapped. You'll
-#             need to include every stat of interest.
-#     """
-#
-#     import xlsxwriter
-#
-#     if not score_name and stat_labels is None:
-#         RuntimeWarning('No score key included')
-#
-#     if not filename.endswith('.xlsx'):
-#         filename += '.xlsx'
-#     workbook = xlsxwriter.Workbook(filename)
-#
-#     for sheetname, tab in results.items():
-#         tab = tab.copy()
-#         # ** rename the stats columns **
-#         #    this could be in a separate function...
-#
-#         tab.index.name = 'Gene'
-#         # get the score label for common scores
-#         score_lab = {'lfc':'Log2(FC)', 'jacks_score':'JACKS score', '':''}[score_name]
-#
-#         if stat_labels:
-#             good_stats = stat_labels
-#         else:
-#             good_stats = dict(
-#                 zip(['fdr', 'fdr_log10', score_name, 'neg_p', 'pos_p'],
-#                     ['FDR', '–Log10(FDR)', score_lab, 'Dropout p-value', 'Enrichment p-value'])
-#             )
-#
-#         # orginally wrote this to work with multiindex columns, but also
-#         if hasattr(tab.columns, 'levels'):
-#             # get the new name for favoured stats, and record those to be removed
-#             new_level = []
-#             dump_stats = []
-#             for c in tab.columns.levels[1]:
-#                 try:
-#                     new_level.append(good_stats[c])
-#                 except KeyError:
-#                     new_level.append(c)
-#                     dump_stats.append(c)
-#
-#             # change the labels of the ones we care for
-#             tab.columns.set_levels(new_level, 1, inplace=True)
-#             # drop the values from the table, does not effect the index
-#             tab.drop(dump_stats, 1, level=1, inplace=True)
-#
-#             # generate a new multiindex
-#             new_multiindex = []
-#             for col in tab.columns:
-#                 if col[1] not in dump_stats:
-#                     new_multiindex.append(col)
-#
-#             tab.columns = pd.MultiIndex.from_tuples(new_multiindex)
-#
-#
-#         # ** Write the worksheet **
-#         sheet = workbook.add_worksheet(name=sheetname)
-#
-#         index_format = workbook.add_format({'bold': True, 'num_format': '@', 'align': 'right'})
-#         header_format = workbook.add_format({'bold': True, 'num_format': '@', 'align': 'center'})
-#         num_format = workbook.add_format({'num_format': '0.00'})
-#
-#         # do the cell merge, we're gonna use the length of levels[1] to figure out the merge range
-#         n_to_merge = len(tab.columns.levels[1])
-#         samples = tab.columns.levels[0]
-#
-#         for samp_i, samp in enumerate(samples):
-#             # row, col, row, col
-#             sheet.merge_range(0, 1 + samp_i * n_to_merge, 0, 0 + (samp_i + 1) * n_to_merge, samp, header_format)
-#
-#         # write the index header
-#         sheet.write(0, 0, 'Gene')
-#
-#         # write the stats headers
-#         for coli, (c1, c2) in enumerate(tab.columns):
-#             # c1 gets wrote using merge, above
-#             sheet.write(1, coli + 1, c2, index_format)
-#
-#         for row_i, gene in enumerate(tab.index):
-#             sheet.write(2 + row_i, 0, gene, index_format)
-#
-#         for col_i, col in enumerate(tab):
-#             for row_i, val in enumerate(tab[col]):
-#                 if not np.isnan(val):
-#                     sheet.write(row_i + 2, col_i + 1, val, num_format)
-#
-#     workbook.close()
-
-
 def write_stats_workbook(sheets: Dict[str, pd.DataFrame], filename=None,
                          workbook:xlsxwriter.Workbook=None,
                          close_workbook=True) -> xlsxwriter.Workbook:
@@ -838,7 +741,6 @@ def write_stats_workbook(sheets: Dict[str, pd.DataFrame], filename=None,
 def quantile_normalise(df):
     rank_mean = df.stack().groupby(df.rank(method='first').stack().astype(int)).mean()
     return df.rank(method='min').stack().astype(int).map(rank_mean).unstack()
-
 
 
 # function that takes two samples and returns ps based on control mask
@@ -940,10 +842,8 @@ def scores_scatter_plotly(x, y, fdr,
                 text=x.index,
                 customdata=fdr.loc[x.index],
                 hovertemplate='%{text}:<br>  %{x:.2f},%{y:.2f}<br>  FDR=%{customdata:.2f}',
-
             )
         )
-
     return fig
 
 def write_plotly_html(results_table:pd.DataFrame,
@@ -975,8 +875,6 @@ def write_plotly_html(results_table:pd.DataFrame,
             which the comparison will be written.
         samp_labels: Dictionary of sample labels
         samp_pair_key_str:
-
-
     """
 
     if samplePairs is None:
