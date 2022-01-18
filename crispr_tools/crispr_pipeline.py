@@ -129,6 +129,7 @@ def call_drugZ_batch(sample_reps:Dict[str, list],
                      control_map:Dict[str, list],
                      counts_file:str,
                      prefix:str,
+                     pseudocount:1,
                      kwargs:dict=None, ):
     """output files written to {file_prefix}.{ctrl}-{treat}.tsv
 
@@ -145,15 +146,13 @@ def call_drugZ_batch(sample_reps:Dict[str, list],
     dzargs.minobs = 1
     dzargs.half_window_size = 500
     dzargs.quiet = False
-    dzargs.pseudocount = 1
+    dzargs.pseudocount = pseudocount
     dzargs.fc_outfile=''
     dzargs.unpaired = False
 
     # not implimented in drugZ at time of writing
     dzargs.remove_genes = None
-
     dzargs.update(kwargs)
-
 
     for ctrl_samp, treat_samples in control_map.items():
 
@@ -224,13 +223,25 @@ def call_mageck_batch(sample_reps:Dict[str, list],
                       counts_file:str,
                       prefix:str,
                       kwargs:dict=None,
-                      skip_extra_mageck=True):
+                      pseudocount=1,):
 
     """Run mageck analyses using comparisons specified in control_map."""
 
     mageck_pairs_done = [] # used to avoid repeating comps in EXTRA
     call("which mageck".split())
     pipeLOG.info('Running MAGeCK version ' + check_output(["mageck", "-v"]).decode())
+
+    # Deal with pseudocount. Mageck doesn't have this facility, so we need
+    #   to write a temporary counts file.
+    # It adds 1 before logging anyway.
+    tmp_fn = None
+    if pseudocount > 1:
+        counts = pd.read_csv(counts_file, sep='\t', index_col=0)
+        num_cols = counts.dtypes != object
+        counts.loc[:, num_cols] += pseudocount
+        tmp_fn = prefix+'temp_counts.tsv'
+        counts.to_csv(tmp_fn, sep='\t')
+        counts_file = tmp_fn
 
     for ctrl_samp, treat_samples in control_map.items():
 
@@ -243,18 +254,21 @@ def call_mageck_batch(sample_reps:Dict[str, list],
 
             call_mageck(ctrl_samp, treat, sample_reps, counts_file, prefix, kwargs)
             mageck_pairs_done.append((ctrl_samp, treat))
-        # EXTRA
-        if not skip_extra_mageck:
-            # run all combinations of samples that share at least one control sample
-            # replace the control group name in the string
-            pref_split = prefix.split('.')
-            pref_split[-2] = 'EXTRA'
-            prefix_extra = '.'.join(pref_split)
-            for c, t in combinations(treat_samples, 2):
-                if (c, t) not in mageck_pairs_done and (t, c) not in mageck_pairs_done:
-                    mageck_pairs_done.append((c, t))
-                    # maybe don't tablulate these at the moment.
-                    call_mageck(c, t, sample_reps, counts_file, prefix_extra, kwargs)
+        # # EXTRA
+        # if not skip_extra_mageck:
+        #     # run all combinations of samples that share at least one control sample
+        #     # replace the control group name in the string
+        #     pref_split = prefix.split('.')
+        #     pref_split[-2] = 'EXTRA'
+        #     prefix_extra = '.'.join(pref_split)
+        #     for c, t in combinations(treat_samples, 2):
+        #         if (c, t) not in mageck_pairs_done and (t, c) not in mageck_pairs_done:
+        #             mageck_pairs_done.append((c, t))
+        #             # maybe don't tablulate these at the moment.
+        #             call_mageck(c, t, sample_reps, counts_file, prefix_extra, kwargs)
+    # delete the file with additional pseudocount, if there is one.
+    if tmp_fn is not None:
+        os.remove(tmp_fn)
 
 def validate_expd(expd:dict):
     pass
