@@ -1,7 +1,7 @@
 from .count_reads import count_reads, count_batch, map_counts
 from .tools import size_factor_normalise, plot_read_violins, plot_ROC, plot_volcano, revcomp, plot_volcano_from_mageck, \
     tabulate_mageck, tabulate_drugz, pca_grid, hart_list, scores_scatter_plotly
-from .jacks_tools import tabulate_score, tabulate_jacks, scores_scatterplot
+#from .jacks_tools import tabulate_score, tabulate_jacks, scores_scatterplot
 from .exp_class import CrisprExperiment
 from .version import __version__
 
