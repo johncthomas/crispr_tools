@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-
+import json
 import logging, os, pathlib, datetime, inspect, argparse, sys
 
 from typing import List, Dict
@@ -24,13 +24,12 @@ try:
     from jacks.infer import LOG as jacksLOG
     jacksLOG.setLevel(logging.WARNING)
 except ImportError:
-    print('To run jacks you need to install JACKS,\n', 'https://github.com/felicityallen/JACKS/tree/master/jacks\n' 
-          "You can still run Mageck though, if it's installed.")
+    # print('To run jacks you need to install JACKS,\n', 'https://github.com/felicityallen/JACKS/tree/master/jacks\n'
+    #       "You can still run Mageck though, if it's installed.")
     def runJACKS(*a, **k):
         raise ModuleNotFoundError('JACKS not installed!!!')
 
 from crispr_tools.drugz import drugZ_analysis
-
 from crispr_tools.tools import list_not_str
 
 # with open(pathlib.Path(__file__).parent/'version.txt') as f:
@@ -42,10 +41,10 @@ class ConfigurationError(Exception):
 
 pipeLOG = logging.getLogger('pipeline')
 pipeLOG.setLevel(logging.INFO)
-logging.getLogger('matplotlib').setLevel(logging.WARNING)
+#logging.getLogger('matplotlib').setLevel(logging.WARNING)
 
 #from crispr_tools.count_reads import count_reads, count_batch, map_counts
-from crispr_tools.tools import plot_read_violins, plot_ROC, plot_volcano, tabulate_mageck, plot_volcano_from_mageck
+from crispr_tools.tools import plot_read_violins, plot_ROC, plot_volcano, tabulate_mageck, tabulate_drugz
 from crispr_tools.jacks_tools import tabulate_score, scores_scatterplot, mahal_nocov
 from crispr_tools.version import __version__
 
@@ -55,8 +54,6 @@ from crispr_tools.version import __version__
 #  eg:
 #   do all reps exsist in the count file
 #   are samples in controls defined in the sample reps
-#todo QC by default!!
-#todo save yaml in output dir
 #todo handle different analyses better, making it easy to add new ones and turn of during analysis
 #todo Either run_{method} or call_{method}
     # in particular there should be functions for each that take the exact same arguments.
@@ -65,8 +62,6 @@ from crispr_tools.version import __version__
 """Go from FastQ files to completed JACKS/MAGeCK analysis. 
 fq->mapped_counts&violin plots are one command (count_reads.count_batch() ) 
 counts->charts&tables another."""
-
-
 
 
 
@@ -84,17 +79,6 @@ class StreamToLogger(object):
          self.logger.log(self.log_level, line.rstrip())
 
 
-# def call_JACKS(fn_counts, fn_repmap, outprefix, norm='mode', kwargs:dict=None):
-#     if kwargs is None:
-#         kwargs={}
-#
-#     # it'll probably be easiest to just write a temp repmap tsv from the xlsx
-#     xl = pd.ExcelFile(fn_repmap)
-#     for ctrlgroup in xl.sheet_names:
-#         repmap = xl.parse(ctrlgroup)
-#         repmap.to_csv('tmp.repmap.tsv', '\t')
-#         runJACKS(fn_counts, 'tmp.repmap.tsv', fn_counts, 'rep', 'samp', None, 'ctrl', 'guide', 'gene',
-#                  norm_type=norm, outprefix=outprefix+'.'+ctrlgroup+'.', **kwargs)
 
 # make the jacks repmap: rep, samp, ctrl
 def call_jacks(sample_reps:Dict[str,List[str]], ctrlmap, count_fn, prefix, kwargs:Dict=None):
@@ -141,29 +125,21 @@ def write_repmap(sample_reps:Dict[str, list], ctrlmap:Dict[str, list], repmap_fn
             f.write('\t'.join(line) + '\n')
 
 
-# class PseudoArgs:
-#     """for holding attributes"""
-#     # https://stackoverflow.com/questions/4984647/accessing-dict-keys-like-an-attribute
-#     def __init__(self, *args, **kwargs):
-#         super(PseudoArgs, self).__init__(*args, **kwargs)
-#         self.__dict__ = self
-
-
-
-
-
-def call_drugZ(fn_counts, outdir, file_prefix,
-               sample_reps:Dict[str, list],
-               controls:Dict[str, Dict[str, list]], drugz_args:dict=None):
-    """output files written to {outdir}/{file_prefix}.{ctrl}-{treat}.tsv
+def call_drugZ_batch(sample_reps:Dict[str, list],
+                     control_map:Dict[str, list],
+                     counts_file:str,
+                     prefix:str,
+                     kwargs:dict=None, ):
+    """output files written to {file_prefix}.{ctrl}-{treat}.tsv
 
     One file per comparison, in the default drugz format. Use tabulate_drugz to
     get a standardised table"""
-    if drugz_args is None:
-        drugz_args = {}
+    kwargs = kwargs
+    if kwargs is None:
+        kwargs = {}
 
     dzargs = AttrDict()
-    dzargs.infile = fn_counts
+    dzargs.infile = counts_file
     # defaults
     dzargs.index_column = 0
     dzargs.minobs = 1
@@ -176,37 +152,31 @@ def call_drugZ(fn_counts, outdir, file_prefix,
     # not implimented in drugZ at time of writing
     dzargs.remove_genes = None
 
-    dzargs.update(drugz_args)
+    dzargs.update(kwargs)
 
-    call(['mkdir', '-p', str(Path(outdir, 'drugz', 'files'))])
 
-    pipeLOG.info('Running drugZ')
+    for ctrl_samp, treat_samples in control_map.items():
 
-    for control_group, control_map in controls.items():
-        for ctrl_samp, treat_samples in control_map.items():
+        dzargs.control_samples = ','.join(
+            list_not_str( sample_reps[ctrl_samp] )
+        )
 
-            dzargs.control_samples = ','.join(
-                list_not_str( sample_reps[ctrl_samp] )
+        treat_samples = list_not_str(treat_samples)
+        for treat_samp in treat_samples:
+
+            dzargs.drug_samples = ','.join(
+                list_not_str(sample_reps[treat_samp])
             )
 
-            treat_samples = list_not_str(treat_samples)
-            for treat_samp in treat_samples:
+            dzargs.drugz_output_file = f"{prefix}.{ctrl_samp}-{treat_samp}.tsv".replace('//', '/')
 
-                dzargs.drug_samples = ','.join(
-                    list_not_str(sample_reps[treat_samp])
-                )
-
-                dzargs.drugz_output_file = f"{outdir}/drugz/files/{file_prefix}.{ctrl_samp}-{treat_samp}.tsv".replace('//', '/')
-
-                drugZ_analysis(dzargs)
-
-
+            drugZ_analysis(dzargs)
 
     pipeLOG.info('Finished drugZ')
 
 
 def call_mageck(control_samp:str, treat_samp:str, sample_reps:Dict[str, List[str]],
-                fn_counts:str, prefix:str, kwargs:List[Dict], logger=None, dryrun=False):
+                counts_file:str, prefix:str, kwargs:List[Dict], logger=None, dryrun=False):
     """Call mageck from the command line:
         "mageck test -k {counts} -t {treat} -c {ctrl} -n {outprefix}{ctrlnm}-{sampnm}"
 
@@ -220,12 +190,12 @@ def call_mageck(control_samp:str, treat_samp:str, sample_reps:Dict[str, List[str
             be in the format {'flag-kwarg':''}
 
     """
-    mageck_str = "mageck test -k {counts} -t {treat} -c {ctrl} -n {outprefix}{ctrlnm}-{sampnm}"
+    mageck_str = "mageck test -k {counts} -t {treat} -c {ctrl} -n {outprefix}.{ctrlnm}-{sampnm}"
     # get the replicate strings
     ctrls = ','.join(sample_reps[control_samp])
     treats = ','.join(sample_reps[treat_samp])
     s = mageck_str.format(
-        counts=fn_counts,
+        counts=counts_file,
         treat=treats,
         ctrl=ctrls,
         outprefix=prefix,
@@ -246,11 +216,12 @@ def call_mageck(control_samp:str, treat_samp:str, sample_reps:Dict[str, List[str
     if not dryrun:
         call(command, shell=True)
 
+
 # CALL SIGNATURE MUST MATCH CALL JACKS and any others
 #todo one function/class as wrapper for all analysis methods
 def call_mageck_batch(sample_reps:Dict[str, list],
                       control_map:Dict[str, list],
-                      count_fn:str,
+                      counts_file:str,
                       prefix:str,
                       kwargs:dict=None,
                       skip_extra_mageck=True):
@@ -270,7 +241,7 @@ def call_mageck_batch(sample_reps:Dict[str, list],
             if treat == ctrl_samp:
                 continue
 
-            call_mageck(ctrl_samp, treat, sample_reps, count_fn, prefix, kwargs)
+            call_mageck(ctrl_samp, treat, sample_reps, counts_file, prefix, kwargs)
             mageck_pairs_done.append((ctrl_samp, treat))
         # EXTRA
         if not skip_extra_mageck:
@@ -283,254 +254,15 @@ def call_mageck_batch(sample_reps:Dict[str, list],
                 if (c, t) not in mageck_pairs_done and (t, c) not in mageck_pairs_done:
                     mageck_pairs_done.append((c, t))
                     # maybe don't tablulate these at the moment.
-                    call_mageck(c, t, sample_reps, count_fn, prefix_extra, kwargs)
+                    call_mageck(c, t, sample_reps, counts_file, prefix_extra, kwargs)
 
 def validate_expd(expd:dict):
     pass
 
 
-def run_analysis(fn_counts, outdir, file_prefix,
-                 sample_reps:Dict[str, list],
-                 controls:Dict[str, Dict[str, list]],
-                 comparisons: List[dict],
-                 volc_labels=15, scatter_labels=10,
-                 charts_only = False, jacks_eff_fn=None,
-                 skip_mageck = False, skip_jacks = False, skip_drugz=True,
-                 skip_charts=False,
-                 dont_log=False, exp_name='', analysis_name='',
-                 skip_extra_mageck = False, jacks_kwargs:Dict=None,
-                 mageck_kwargs:dict=None,
-                 drugz_kwargs:dict=None,
-                 ctrl_genes:str=None, notes='', **unused_args):
-
-
-    #call(['mkdir', outdir])
-
-        #haaaacky, but the fact it cant make a dir and subdir at the same time is annoying
-    p = str(outdir)
-    for i in range(len(p)):
-        #print(p)
-        d = p.split('/')[:i+1]
-        try:
-            os.mkdir('/'.join(d))
-        except FileExistsError:
-            pass
-
-    if jacks_kwargs is None:
-        jacks_kwargs = {}
-    if drugz_kwargs is None:
-        drugz_kwargs = {}
-
-    if ctrl_genes:
-        jacks_kwargs['ctrl_genes'] = ctrl_genes
-        #todo write a temp file for mageck, and clean up all temp files (put paths in a list)
-
-    for analysis_str in ('jacks', 'mageck'):
-        call(['mkdir', '-p', str(Path(outdir, analysis_str))])
-        call(['mkdir', str(Path(outdir, analysis_str, 'volcano'))])
-        call(['mkdir', str(Path(outdir, analysis_str, 'scatter'))])
-        call(['mkdir', str(Path(outdir, analysis_str, 'tables'))])
-        call(['mkdir', str(Path(outdir, analysis_str, 'files'))])
-        #call(['mkdir', str(Path(outdir, 'scattercharts'))])
-
-    if not dont_log:
-        t = '{}-{}-{}_{}h{}m{}s.{}'.format(*datetime.datetime.now().timetuple()[:-1])
-        set_logger(str(Path(outdir, file_prefix + f'log_{t}.txt')))
-
-        #TODO sort out logging situtation, just have thing that prints and writes and logs the same message?
-        #sys.stderr = StreamToLogger(pipeLOG, logging.ERROR)
-    pipeLOG.info('exp_name = ' + exp_name)
-    pipeLOG.info('analysis_name = ' + analysis_name)
-    pipeLOG.info('Version = '+__version__)
-    pipeLOG.info('Working dir = '+os.getcwd())
-    pipeLOG.info('outdir = '+outdir)
-
-    frame = inspect.currentframe()
-    args, _, _, values = inspect.getargvalues(frame)
-    pipeLOG.info('\n\t'.join([f"{x} = {values[x]}" for x in args]))
-    pipeLOG.info(f"Full outdir = {os.path.realpath(outdir)}")
-
-    pipeLOG.info('Control groups being used: '+', '.join(controls.keys()))
-
-    for ctrlgroup, ctrlmap in controls.items():
-        # File name prefixes
-        fnprefix = file_prefix + '.' + ctrlgroup + '.'
-        pipeLOG.info(f'\nRunning {ctrlgroup}, writing to {fnprefix}')
-        #jmode_prefix = str(Path(outdir, 'jacks_mode', 'files', fnprefix))
-        jacks_prefix = str(Path(outdir, 'jacks', 'files', fnprefix))
-        mf_prefix = str(Path(outdir, 'mageck', 'files', fnprefix))
-
-        #################
-        # Run JACKS
-        if not charts_only and not skip_jacks:
-
-            call_jacks(sample_reps, ctrlmap, fn_counts, jacks_prefix, jacks_kwargs)
-
-        #########
-        # *run MAGECK
-        if not charts_only and not skip_mageck:
-            call_mageck_batch(sample_reps, controls[ctrlgroup], fn_counts, mf_prefix, mageck_kwargs, skip_extra_mageck)
-
-        if not charts_only and not skip_drugz:
-            pipeLOG.info('Running DrugZ.')
-            call_drugZ(fn_counts, outdir, file_prefix, sample_reps, controls, drugz_kwargs)
-
-        ############
-        #* Get tables
-        #todo probably have a dict of tables that is populated as we go. And probably just use snakemake
-        analyses_used = []
-        if not skip_jacks:
-            #scoresmode = tabulate_score(jmode_prefix)
-            scores_jacks = tabulate_score(jacks_prefix)
-            analyses_used.extend([('jacks', 'jacks_score', scores_jacks)])
-            if not charts_only:
-                pipeLOG.info('Writing JACKS tables')
-                #modfn = str(Path(outdir, 'jacks_mode', 'tables', fnprefix+'jacks_scores.csv'))
-                jacksfn = str(Path(outdir, 'jacks', 'tables', fnprefix + 'jacks_scores.csv'))
-                #medfn = str(Path(outdir, 'jacks_median', 'tables', fnprefix + 'jacks_scores.csv'))
-                pipeLOG.info('Writing: '+jacksfn)
-                #scoresmode.to_csv(modfn)
-                scores_jacks.to_csv(jacksfn)
-
-        if not skip_mageck:
-            scores_mageck = tabulate_mageck(mf_prefix)
-            analyses_used.append(('mageck', 'lfc', scores_mageck))
-            if not charts_only:
-                magfn = str(Path(outdir, 'mageck', 'tables', fnprefix + 'mageck_table.csv'))
-                pipeLOG.info('Writing MAGeCK tables '+magfn)
-                scores_mageck.to_csv(magfn)
-
-        #################
-        #* volcano charts of all
-        # use the universal one, have label options as part of args, maybe as a dict.
-        if not skip_charts:
-            for analysis_str, xkey, analysis_tab in analyses_used:
-                pipeLOG.info('Volcano plot, '+analysis_str)
-                #analysis = analysis
-                for exp in analysis_tab.columns.levels[0]:
-                    if analysis_str.startswith('jacks'):
-                        chart_title = '{} from {} ({} normalisation)'.format(exp, ctrlgroup, analysis_str)
-                    else:
-                        # split by fnpref just in case it has a dash in it...
-                        #print(exp)
-                        ctrlnm, treatnm = exp.split('-')
-                        chart_title = '{} from {} ({} analysis)'.format(treatnm, ctrlnm, analysis_str)
-                    plot_volcano(
-                        xkey, 'fdr_log10', analysis_tab[exp], chart_title,
-                        volc_labels,volc_labels,p_thresh=0.1,
-                        outfn=str(Path(outdir, analysis_str, 'volcano', fnprefix+exp+'.'+analysis_str+'_volcano.png'))
-                    )
-                    plt.close()
-
-        analyses_tups = []
-        if not skip_jacks:
-            analyses_tups.append(('jacks', scores_jacks))
-        # if not skip_mageck:
-        #     analyses_tups.append(('mageck', scores_mageck))
-
-        # do jacks scatter and mahal table. tups should never be empty
-        for analysis_str, analysis_tab in analyses_tups:
-            pipeLOG.info(f'Doing comparisons of {analysis_str}')
-            mahals = pd.DataFrame(index=analysis_tab.index)
-            comparisons_done = False
-            for comp_from, comp_to in iter_comps(comparisons, analysis_tab):
-                comparisons_done = True
-                pipeLOG.info(f"\t{comp_from} vs {comp_to}")
-                #scatter
-
-                if not skip_charts:
-                    scores_scatterplot(comp_from, comp_to, analysis_tab,
-                                       label_pos=scatter_labels, label_neg=scatter_labels,
-                                       dist_name='Mahalanobis distance')
-                    plt.title(f"{comp_from} vs {comp_to} ({ctrlgroup}, JACKS)")
-                    fn = str(
-                        Path(outdir, analysis_str, 'scatter', fnprefix+"{}_vs_{}.scatter.png".format(comp_from, comp_to))
-                    )
-                    pipeLOG.info('Writing: '+fn)
-                    plt.savefig(fn, dpi=150)
-                    plt.close()
-
-                # pop mahal table
-                A, B = analysis_tab[comp_from], analysis_tab[comp_to]
-                _, _, mahal = mahal_nocov(A['jacks_score'], A['stdev'], B['jacks_score'], B['stdev'])
-                mahals.loc[:, f"{comp_from} vs {comp_to}"] = mahal
-
-            if comparisons_done:
-                mahalfn = Path(outdir, analysis_str, 'tables', fnprefix+f"mahalanobis_distances.csv")
-                pipeLOG.info('Writing: '+str(mahalfn))
-                mahals.to_csv(mahalfn)
-
-            # # wipes over the one produced above if comptab exists.
-            # call(['tar', '-zcf', str(Path(outdir, analysis_str + 'scatter_charts.tar.gz')),
-            #       '-C', str(Path(outdir, analysis_str, 'scatter')), '.'])
-            #         #str(Path(outdir, analysis_str, 'scatter'))])
-            # call(['tar', '-zcf', str(Path(outdir, analysis_str + 'tables.tar.gz')),
-            #       '-C', str(Path(outdir, analysis_str, 'tables')), '.'])
-            # #str(Path(outdir, analysis_str, 'tables'))])
-
-    #* END OF control group loop
-    ###################
-
-    # Do all the mageck comparisons at the end as we need the NT->treat for significance
-    if not skip_mageck:
-        pipeLOG.info('Doing comparisons of mageck')
-        mag_tables = {}
-        # Get the tables, including the intersample combinations
-        ctrlgroups = list(controls.keys())
-        if not skip_extra_mageck:
-            ctrlgroups += ['EXTRA']
-        for ctrlgroup in ctrlgroups:
-            fnprefix = file_prefix + '.' + ctrlgroup + '.'
-            mf_prefix = str(Path(outdir, 'mageck', 'files', fnprefix))
-            scores_mageck = tabulate_mageck(mf_prefix)
-            mag_tables[ctrlgroup] = scores_mageck
-        # go through each comparison pair and check for the existence of the right measures.
-        for comp_from, comp_to in iter_comps(comparisons):
-            lfc_tabs = []
-            fdr_tabs = []
-            for ctrlgroup, tab in mag_tables.items():
-                # column headers are "ctrl-samp"
-                exp = pd.Series(tab.columns.levels[0], index=tab.columns.levels[0])
-                samps = set([c.split('-')[1] for c in exp])
-                # so, if a comp is specified with NT->T then we want to use NT->T for fdr and
-                # ctrl->[NT/T] LFCs for the scatter, then name by ctrl.NT_T
-                if comp_from in samps and comp_to in samps:
-                    treat_header = exp[exp.str.contains(comp_to)][0]
-                    ctrl_header = exp[exp.str.contains(comp_from)][0]
-                    # some weird groups will exist as "ctrlgroup", so check the ctrls actually match
-                    if ctrl_header.split('-')[0] == treat_header.split('-')[0]:
-                        lfc_tabs.append((ctrlgroup, ctrl_header,  treat_header,))
-                # if f'{comp_to}-{comp_from}' in exp:
-                #     fdr_tabs.append((ctrlgroup, f'{comp_to}-{comp_from}'))
-                if f'{comp_from}-{comp_to}' in exp:
-                    fdr_tabs.append((ctrlgroup, f'{comp_from}-{comp_to}'))
-                else: # no source of sig
-                    pipeLOG.info(f'{comp_from}->{comp_to} not possible, missing comparison.')
-                    continue
-            # print(lfc_tabs)
-            # print('**', fdr_tabs)
-            if not skip_charts:
-                for fdrtab, fdrexp in fdr_tabs:
-                    for ctrlgroup, ctrl_header,  treat_header in lfc_tabs:
-                        pipeLOG.info(f'MAgeck results comp using {ctrl_header} {treat_header}, {fdrexp}')
-
-                        scores_scatterplot(ctrl_header, treat_header, mag_tables[ctrlgroup], True, scatter_labels, scatter_labels,
-                                           distance=mag_tables[fdrtab].loc[:, (fdrexp, 'fdr_log10')],
-                                           min_label_dist=0.3,
-                                           dist_name='log10(FDR)')
-                        plt.title(f"{ctrl_header} vs {treat_header} (MAGeCK)")
-                        fn = str(
-                            Path(outdir, 'mageck', 'scatter', file_prefix+ '.' + ctrlgroup + ".{}_vs_{}.scatter.png".format(comp_from, comp_to))
-                        )
-                        pipeLOG.info('Writing: '+fn)
-                        plt.savefig(fn, dpi=150)
-                        plt.close()
-
-    import shutil
-    shutil.copy(fn_counts, Path(outdir, Path(fn_counts).name))
-
-    pipeLOG.info("Done. "+str(datetime.datetime.now()))
-
+analysis_functions = {'mageck':call_mageck_batch, 'drugz':call_drugZ_batch}
+analysis_tabulate = {'mageck':tabulate_mageck, 'drugz':tabulate_drugz}
+available_analyses = analysis_functions.keys()
 
 def iter_comps(comparisons: List[dict], tab: pd.DataFrame=None):
     for comparison in comparisons:
@@ -550,8 +282,6 @@ def process_control_map(controls, samples):
 
     controls = copy(controls)
     for ctrl_grp, ctrlmap in controls.items():
-        #todo: if ctrlmap is a list assume a single control group and don't crash
-        #print('ctrlmap',  ctrlmap)
         for ctrl, samps in ctrlmap.items():
             if type(samps) == str:
                 samps = [samps]
@@ -589,138 +319,307 @@ def check_multicontrol_to_treat(control_map):
     if conflict_found:
         return {grp:cnflct for grp, cnflct in conflicts.items() if cnflct}
 
+def validate_required_arguments(arguments:dict):
+    """Check for required options, the basic format of `analyses` options,
+    and that sample names match in control_groups and sample_reps.
+
+    If validation fails, raise a RuntimeError"""
+
+
+
+    # check the required top level options are all present
+    required_options = ['sample_reps', 'experiment_id', 'analysis_version', 'counts_file',
+                        'file_prefix', 'control_groups', 'analyses']
+    option_is_missing = lambda op: (op not in arguments.keys()) or (not arguments[op])
+    missing_options = [op for op in required_options if option_is_missing(op)]
+    if missing_options:
+        raise RuntimeError(
+            f'Required options missing (or valueless) from config file: {",".join(missing_options)}'
+        )
+
+    # check the required analyses options present
+    required_analysis_opts = ['method']
+    for k in required_analysis_opts:
+        for ans in arguments['analyses']:
+            if k not in ans:
+                raise RuntimeError(
+                    f'Required analysis {k} option missing from analysis {ans}.'
+                )
+
+    # and the analyses dics themselves are formatted correctly.
+    analysis_opts_types = {'method':str, 'kwargs':dict, 'groups':list, 'counts_file':str,
+                           'label':str}
+    for analysis_dict in arguments['analyses']:
+        for opt, tipe in analysis_opts_types.items():
+            try:
+                if type(analysis_dict[opt]) != tipe:
+                    raise RuntimeError(
+                        f"Analysis option types not as expected: {arguments['analyses']}"
+                    )
+            # there are optional options, ignore them if they're missing
+            except KeyError:
+                pass
+
+    samples = arguments['sample_reps'].keys()
+    missing_samples = set()
+    for _, ctrl_samps in arguments['control_groups'].items():
+        for ctrl, samps in ctrl_samps.items():
+            if ctrl not in samples:
+                missing_samples.add(ctrl)
+            for smp in samps:
+                if smp not in samples:
+                    missing_samples.add(smp)
+    missing_samples = list(missing_samples)
+    if missing_samples:
+        raise RuntimeError(f"Samples named in control_groups missing in sample_reps:\n{', '.join(missing_samples)}")
+
 def process_arguments(arguments:dict):
     """deal with special keywords from the experiment yaml, and allow some
     ambiguous syntax in the yaml. Also do some checking of validity"""
-    samples = arguments['sample_reps'].keys()
-    controls = process_control_map(arguments['controls'], samples)
-    arguments['controls'] = controls
+    # (currently optional arguments are handled in the pipeline, but
+    #  alternatively I could have them set here
+    #  so changes to how the arguments
+    #  work would require only changingn things here.
+    #  This is probably fine for now.)
 
-    # in case strings are passed instead of lists
-    if 'comparisons' in arguments:
-        for comp in arguments['comparisons']:
-            #print(arguments['comparisons'])
-            for k, v in comp.items():
-                if type(v) == str:
-                    comp[k] = [v]
-    if 'sample_reps' in arguments:
-        for k, v in arguments['sample_reps'].items():
-            if type(v) == str:
-                arguments['sample_reps'][k] = [v]
+    # raise exception for invalid arguments
+    validate_required_arguments(arguments)
+
+    samples = arguments['sample_reps'].keys()
+    controls = process_control_map(arguments['control_groups'], samples)
+    arguments['control_groups'] = controls
+
+    # generate output_dir from exp_id and analysis_version
+    arguments["output_dir"] = os.path.join(arguments['output_dir'],
+                                           arguments["experiment_id"],
+                                           arguments["analysis_version"])
+
+    pipeLOG.info(f'output_dir = {arguments["output_dir"]}')
+
+    for k, v in arguments['sample_reps'].items():
+        if type(v) == str:
+            arguments['sample_reps'][k] = [v]
 
     reps_list = []
-    [reps_list.extend(r) for r in arguments['sample_reps'].values()]
+    for r in arguments['sample_reps'].values():
+        reps_list.extend(r)
 
-    with open(arguments['fn_counts']) as f:
+    with open(arguments['counts_file']) as f:
         line = next(f)
         if not '\t' in line:
             raise ConfigurationError(
-                f"No tabs in count file {arguments['fn_counts']}, is it comma seperated?\n\t{line}"
+                f"No tabs in first line of count file {arguments['counts_file']}"+
+                f", is it comma seperated?\n\t{line}"
             )
         # check for missing/miss-spelled replicates
         cnt_reps = line.strip().split('\t')
-        #print('\n\n**************', reps_list, '\n\n**************', cnt_reps   )
         missing_reps = [r for r in reps_list if r not in cnt_reps]
         if missing_reps:
             raise ValueError(
-                f"Replicates not found in count file: {missing_reps}"
+                f"These replicates not found in count file: {missing_reps}"
                 f"\nCount columns: {', '.join(cnt_reps)}"
             )
 
-    # JACKS doesn't allow you to compare a single treat to multiple controls, so check for that
-    if not arguments['skip_jacks']:
-        pp = pprint.PrettyPrinter(indent=1)
-        ctrl_conflicts = check_multicontrol_to_treat(controls)
-        if ctrl_conflicts:
-
-            pp.pprint({'\nSamples with conflicts, fix in YAML:':ctrl_conflicts})
-            raise RuntimeError('Treatment mapped to multiple controls will cause JACKS error. (see above for samples)')
-
-
-    if not 'labels' in arguments or not arguments['labels']:
-        arguments['labels'] = {s:s for s in samples}
-
+    # turn the csv analyses into an actual list
+    for k in 'skip_groups', 'skip_analyses':
+        if (k in arguments) and arguments[k]:
+            arguments[k] = arguments[k].split(',')
     return arguments
 
 
+def run_analyses(counts_file, output_dir, file_prefix,
+                 sample_reps:Dict[str, list],
+                 control_groups:Dict[str, Dict[str, list]],
+                 analyses:List[dict],
+                 methods_kwargs:Dict=None,
+                 dont_log=False,
+                 compjoiner='-', #tools.ARROW,
+                 use_group_as_label=False,
+                 notes='',
+                 skip_analyses=None,
+                 skip_groups=None):
 
-def _do_qcs(count, expd, jobs = ('pca', 'clustermap', 'violinplots', 'regressions')):
-    """Perform PCAs, clustermap, regressions between clones using both
-    normalised counts and lfcs."""
+    """Run batches of CRISPR analyses."""
 
-    lncounts = tools.size_factor_normalise(count)
-    samp_reps = expd['sample_reps']
-    ctrl_map  = expd['controls']
+    #pipeLOG.warning(f'Unrecognised arguments passed to run_analyses:\n   {unrecognised_kwargs}')
+    pipeLOG.info(f"notes: {notes}")
 
-    plot_read_violins(lncounts, size_norm=False, log=False)
+    if skip_analyses is None:
+        skip_analyses = []
+    if skip_groups is None:
+        skip_groups = []
+
+    # Create the root experiment directory
+    # Can't make directory and subdir at the same time, so iterate through the tree
+    p = str(output_dir)
+    for i in range(len(p)):
+        #print(p)
+        d = p.split('/')[:i+1]
+        try:
+            os.mkdir('/'.join(d))
+        except FileExistsError:
+            pass
+
+    if not dont_log:
+        t = '{}-{}-{}_{}h{}m{}s.{}'.format(*datetime.datetime.now().timetuple()[:-1])
+        set_logger(str(Path(output_dir, file_prefix + f'log_{t}.txt')))
+
+    # pull the args from the function
+    frame = inspect.currentframe()
+    args, _, _, values = inspect.getargvalues(frame)
+    del frame # help garbage collection
+    pipeLOG.info('\n\t'.join([f"{x} = {values[x]}" for x in args]))
+    pipeLOG.info(f"Full output directory = {os.path.realpath(output_dir)}")
+
+    # create the directories
+    methods_used = list(set([ans['method'] for ans in analyses]))
+
+    for analysis_method in methods_used:
+        call(['mkdir', '-p', str(Path(output_dir, analysis_method))])
+        #call(['mkdir', str(Path(output_dir, analysis_method, 'tables'))])
+        call(['mkdir', str(Path(output_dir, analysis_method, 'files'))])
+    table_dir = str(Path(output_dir, 'tables'))
+    call(['mkdir', table_dir])
+
+    ######################
+    ## Run the analyses ##
+    ######################
+    ran_analyses = set()
+    for analysis_dict in analyses:
+        analysis_method = analysis_dict['method']
+        if analysis_method in skip_analyses:
+            pipeLOG.info(f"Skipping analysis method {analysis_method}")
+            continue
+        try:
+            default_method_kwargs = methods_kwargs[analysis_method]
+        except:
+            default_method_kwargs = {}
+
+        # if we do not specify groups, use all control groups.
+        if 'groups' not in analysis_dict:
+            groups = {g:{} for g in control_groups.keys()}
+        else:
+            groups = analysis_dict['groups']
+
+        # These kwargs set at the analysis level, can be overridden by args at
+        #   the control group level. New, analysis level, args overwrite experiment
+        #   level args
+        # try:
+        #     curr_kwargs = {**default_method_kwargs, **analysis_dict['kwargs']}
+        # except KeyError:
+        #     curr_kwargs = copy(default_method_kwargs)
+        try:
+            if analysis_dict['kwargs']:
+                curr_kwargs = analysis_dict['kwargs']
+            else:
+                curr_kwargs = default_method_kwargs
+        except KeyError:
+            curr_kwargs = default_method_kwargs
+
+
+        # go through the selected groups for this analysis and run the thing
+        for grp in groups:
+            if grp in skip_groups:
+                pipeLOG.info(f"Skipping group {grp}")
+                continue
+            if use_group_as_label:
+                labstr = grp
+            if 'label' in analysis_dict:
+                labstr = '.'+analysis_dict['label']
+            else:
+                labstr = ''
+
+            ctrl_map = control_groups[grp]
+            try:
+                curr_counts = analysis_dict['counts_file']
+            except KeyError:
+                curr_counts = counts_file
+
+            pipeLOG.info(
+                f"Running batch {analysis_method}\n\tgroup: {grp}\n\twith options: {analysis_dict}\n"
+                f"\tWith kwargs: {curr_kwargs}"
+            )
+
+            get_prefix = lambda out_type: str(Path(output_dir, analysis_method, out_type, f"{file_prefix}{labstr}"))
+            # all these things must have the same signature
+            out_prefix = get_prefix('files')
+            ran_analyses.add((analysis_method, out_prefix, f"{file_prefix}{labstr}"))
+            analysis_func = analysis_functions[analysis_method]
+            analysis_func(sample_reps, ctrl_map, curr_counts, out_prefix, curr_kwargs)
+
+        # tabulate the analyses
+        for analysis_method, results_prefix, table_file_prefix in list(ran_analyses):
+            tab = analysis_tabulate[analysis_method](results_prefix, compjoiner)
+            tabfn = str(os.path.join(output_dir, 'tables', f'{table_file_prefix}.{analysis_method}_table.csv'))
+            pipeLOG.info(f'writing table: {tabfn}')
+            tab.to_csv(tabfn, encoding='utf-8-sig')
+
 
 
 if __name__ == '__main__':
     print(__version__)
     parser = argparse.ArgumentParser(
-        description="Run mageck and jacks analyses using a YAML file.\n "
-                    "Use arguments below to override yaml options"
+        description="Run mageck and jacks analyses using a JSON file.\n "
+                    "Use arguments below to override JSON options"
     )
-    parser.add_argument('fn_yaml', metavar="YAML",
-                        help="path to .yml file specifying arguments. At a minimum must contain `sample_reps`"
-                             " & `controls` keywords and values. "
-                             "Other options are overridden by command line arguments.")
-    parser.add_argument('--fn_counts', metavar='COUNTS', help='Path to counts file', default=None)
-    parser.add_argument('--outdir', metavar='OUTDIR', default=None,
-                        help='Path to where results files will be stored, a '
-                        "directory structure will be created.")
-    parser.add_argument('--file_prefix', metavar='PREFIX', default=None,
+
+    parser.add_argument(
+        'config_file', metavar='JSON_PATH',
+        help = "path to .json file specifying arguments. At a minimum must contain `sample_reps`"
+                  ", `analyses` & `control_groups` keywords and values. "
+                  "Other options may be overridden by command line arguments."
+        )
+    parser.add_argument('--counts', metavar='COUNTS', help='Path to counts file',
+                        default=None, dest='counts_file')
+    parser.add_argument('--output-dir', metavar='PATH', default='.',
+                        help=('Path to where results directory will be created if not current'
+                              ' directory. Experiment_id and analysis_version will determine results dir.') )
+    parser.add_argument('--file-prefix', default=None,
                         help="String to form identifying prefix for all files generated.")
-    parser.add_argument('-v', '--volc-labels',dest='volc_labels', metavar='N', type=int, default=None,
-                        help="Number of depleted/enriched genes to label in volcano charts.")
-    parser.add_argument('-s', '--scatter-labels', metavar='N', type=int, default=None, dest='scatter_labels',
-                        help="Number of genes to label on either side of The Line in scatter charts.")
-    parser.add_argument('--charts-only', action='store_true', default=None,
-                        help="Don't run MAGeCK or JACKS, just produce plots with existing files.")
-    parser.add_argument('-j', '--jacks-efficacy', metavar='EFF_FILE', dest='jacks_eff_fn', default=None,
-                        help='Path to efficacy file to be used in JACKS analysis. '
-                             'If the provided string contains {}, the repmap ctrl group will be substituted'
-                             'into the filename. Optional.')
-    parser.add_argument('--skip-jacks', action='store_true', dest='skip_jacks', default=None,
-                        help="don't run JACKS analysis or try to plot from JACKS analyses")
-
-    parser.add_argument('--skip-mageck', action='store_true', dest='skip_mageck', default=None,
-                        help="don't run MAGeCK analysis or try to plot from MAGeCK analyses")
-
-    parser.add_argument('--skip-charts', action='store_true', dest='skip_charts', default=None,
-                        help="don't produce any charts")
-
+    parser.add_argument('--skip-analyses', metavar='list,of,progs', default=None,
+                        help='Filter analyses to be run.')
+    parser.add_argument('--skip-groups', metavar='list,of,groups', default=None,
+                        help='Filter control groups (as defined in exp dict) to be included.')
     parser.add_argument('--dont-log', action='store_true', dest='dont_log', default=None,
                         help="Don't write a log file.")
 
-
-
     # get arguments from the command line and the YAML
     clargs = parser.parse_args() # need to assign this before calling vars() for some reason
-    cmd_args = vars(clargs)
-    yml_args = yaml.safe_load(open(cmd_args['fn_yaml']))
+    cmd_line_args = vars(clargs)
 
-    del cmd_args['fn_yaml']
+    # load the configuration file, stripping out the "comment" lines
+    config_file = cmd_line_args['config_file']
+    json_str = '\n'.join([l for l in open(config_file) if l.replace(' ', '')[0] != '#'])
 
-    # generate outdir from exp_name and analysis_name
-    if "outdir" not in yml_args:
-        yml_args["outdir"] = os.path.join(yml_args["exp_name"],  yml_args["analysis_name"])
+    def dict_raise_on_duplicates(ordered_pairs):
+        """Reject duplicate keys."""
+        d = {}
+        for k, v in ordered_pairs:
+            if k in d:
+                raise ValueError("Duplicate key in JSON: %r" % (k,))
+            else:
+                d[k] = v
+        return d
 
+    config_file_args = json.loads(json_str, object_pairs_hook=dict_raise_on_duplicates)
 
     # over write yml_args with any specified in the command line
-    for k, v in cmd_args.items():
+    for k, v in cmd_line_args.items():
         if v is not None:
-            yml_args[k] = v
-    print(yml_args)
-    args = process_arguments(yml_args)
-    del args['labels']
-    #print(args)
+            config_file_args[k] = v
 
-    run_analysis(**args)
+    # validate and process arguments
+    args = process_arguments(config_file_args)
 
+    # These don't need to be passed to the pipeline.
+    for k in ['config_file', 'notes', 'experiment_id', 'analysis_version',
+              'labels']:
+        try:
+            del args[k]
+        # if it doesn't exist...
+        except KeyError:
+            # we don't need to delete it
+            pass
 
-    # run_analysis(**vars(clargs))
-    # os.chdir('/Users/johnc.thomas/Dropbox/crispr/screens_analysis/matylda_HS715-20')
-    # run_analysis(**{'fn_counts': '/Users/johnc.thomas/Dropbox/crispr/counts_all/matylda_HS715-20.counts.tsv',
-    #  'fn_repmap': 'matylda_HS715-20.repmap.3.xlsx', 'outdir': 'take5', 'file_prefix': 'HS715-20', 'labeldep': 30,
-    #  'labelenr': 10, 'charts_only': False})
+    run_analyses(**args)
+
