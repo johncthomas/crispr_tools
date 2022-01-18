@@ -25,9 +25,10 @@ setup(
     install_requires = [
         'numpy', 'scipy', 'matplotlib', 'pandas', 'shapely', 'pyyaml',
         'statsmodels', 'seaborn', 'attrdict', 'xlsxwriter', 'openpyxl',
+        'scikit-learn',
     ],
     
-    python_requires = '>=3.6',
+    python_requires = '>3.5',
     scripts=['crispr_tools/crispr_pipeline.py', 'crispr_tools/count_reads.py'],
     include_package_data=True,
 )
