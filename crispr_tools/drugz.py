@@ -186,6 +186,8 @@ def empirical_bayes(fold_change, half_window_size, no_of_guides, fc_replicate_id
 
     # Get the variation estimate for the final bin and set the remaining values in the empirical bayes column
     # equal to this estimate
+    if no_of_guides <= half_window_size:
+        raise RuntimeError('Not enough guides to estimate variation: lower half_window_size')
     results = fold_change.iloc[no_of_guides - (half_window_size + 1)][empirical_bayes_id]
     fold_change[empirical_bayes_id][no_of_guides - half_window_size:] = results
 
@@ -401,17 +403,20 @@ def drugZ_analysis(args):
     log_.debug("Control samples:" + str(control_samples))
     log_.debug("Treated samples:" + str(treatment_samples))
 
-    log_.info("Loading the read count matrix")
+    #log_.info("Loading the read count matrix")
     reads = load_reads(filepath=args.infile, index_column=0, genes_to_remove=remove_genes)
     no_of_guides = reads.shape[0]
 
     normalized_counts = normalize_readcounts(reads=reads, control=control_samples, treatment=treatment_samples)
-    log_.info("Normalizing read counts")
+    #log_.info("Normalizing read counts")
     num_replicates = len(control_samples)
     fc_zscore_ids = list()
     fold_changes = list()
 
-    if args.unpaired:
+    if args.unpaired or (len(control_samples) != len(treatment_samples)):
+        if not args.unpaired:
+            log_.warning("Must have the same number of control and drug samples to run the paired approach"
+                         ". Switching to unpaired approach")
         log_.info('Calculating gene-level Zscores unpaired approach')
         fold_change2 = calculate_unpaired_foldchange(reads, normalized_counts,
                                                      control_samples=control_samples,
@@ -429,9 +434,6 @@ def drugZ_analysis(args):
 
         log_.info('Writing output file unpaired results')
         write_drugZ_output(outfile=args.drugz_output_file, output=gene_normZ2)
-
-    elif len(control_samples) != len(treatment_samples) and args.unpaired == False:
-        log_.error("Must have the same number of control and drug samples to run the paired approach")
 
     else:
 
