@@ -8,8 +8,8 @@ from subprocess import call, check_output
 from pathlib import Path
 from itertools import combinations
 
-from argparse import Namespace
-from attrdict import AttrDict, AttrMap
+
+from attrdict import AttrDict
 
 import yaml
 import numpy as np
@@ -35,7 +35,7 @@ from crispr_tools.tools import list_not_str
 # with open(pathlib.Path(__file__).parent/'version.txt') as f:
 #     __version__ = f.readline().replace('\n', '')
 
-class ConfigurationError(Exception):
+class PipelineOptionsError(Exception):
     """Errors in the configuration file that would prevent the pipeline from running"""
     pass
 
@@ -59,9 +59,160 @@ from crispr_tools.version import __version__
     # in particular there should be functions for each that take the exact same arguments.
 
 
-"""Go from FastQ files to completed JACKS/MAGeCK analysis. 
-fq->mapped_counts&violin plots are one command (count_reads.count_batch() ) 
-counts->charts&tables another."""
+
+
+
+def clargs_to_dict(argstring) -> Dict[str, str]:
+    """process command line args of format:
+    --arg1 val --flag --arg2 val2
+
+    returns {'arg1':'val', 'flag':'', 'arg2':'val2'}"""
+    kwargs = {}
+    while '  ' in argstring:
+        argstring = argstring.replace('  ', ' ')
+    splitargs = argstring.split()
+    for i in range(len(splitargs)):
+        thing = splitargs[i]
+        if thing.startswith('-'):
+            key = thing.replace('-', '')
+            if i+1==len(splitargs) or splitargs[i+1].startswith('-'):
+                kwargs[key] = ''
+            else:
+                kwargs[key] = splitargs[i+1]
+    return kwargs
+
+#todo test excel kwargs
+
+class AnalysisWorkbook:
+    """Parse the excel sheet describing how an experiment should be analysed.
+    Generates the dict for JSON or calling .run_analyses
+
+    Default method kwargs:
+        mageck: --remove-zero both --remove-zero-threshold 2*pseudocount
+
+    additional_options overwrites anything in the excel file"""
+
+    def __init__(self, xlfn, parse_workbook=True, **additional_options):
+        #self.xpk = 'Experiment details'
+        self.wb = self.load_analysis_workbook(xlfn)
+        if parse_workbook:
+            self.expd = self.workbook_to_dict(**additional_options)
+
+    def varefy_wb_integrity(self):
+        assert not self.wb['Sample details'].index.duplicated().any()
+
+    def load_analysis_workbook(self, fn):
+        # nothing needs to be numeric
+        wb = pd.read_excel(fn, sheet_name=None, dtype=object, )
+        wb = {k:tab.fillna('') for k,tab in wb.items()}
+
+        wb['Sample details'] = wb['Sample details'].set_index('Replicate')
+
+        wb['Experiment details'] = pd.read_excel(
+            fn, sheet_name='Experiment details',
+            header=None, index_col=0,
+        )[1].fillna('')
+
+        #wb['Sample details'] = wb['Sample details'].set_index('Replicate')
+
+        return wb
+
+    def workbook_to_dict(self, **additional_options):
+        # couple of options are cells that can contain comma split values
+        # pretty easy to inadvertently slip a space in there...
+        safesplit = lambda x: x.replace(' ', '').split(',')
+
+        repdeets = self.wb['Sample details']
+        ctrlgrps = self.wb['Control groups']
+
+        # all "Experiment details" k:v are top level and don't need processing
+        experiment_dictionary = {}
+
+        deets = self.wb['Experiment details'].to_dict()
+        for wbk, jsonk in {'Experiment name': 'experiment_id',
+                       'Analysis version': 'analysis_version',
+                       'Notes': 'notes',
+                       'File prefix': 'file_prefix'}.items():
+            try:
+                experiment_dictionary[jsonk] = deets[wbk]
+            except KeyError:
+                # Most won't exist and any other errors
+                #   will get picked up later
+                pass
+
+        # control groups. Results in:
+        # {grpA:{ctrl_samp:[test_samp1, test_samp2, ...], ...}, ...}
+        ctrl_dict = {}
+        for grpn in ctrlgrps.Group.unique():
+            cgrp = ctrlgrps[ctrlgrps.Group == grpn]
+            # groupby gives the indexes, we want the Test sample values
+            # gotta list() the reps cus json.dump can't handle an ndarray
+            g = {c:list(cgrp.loc[i, 'Test sample'].values)
+                 for c, i in cgrp.groupby('Control sample').groups.items()}
+            ctrl_dict[grpn] = g
+        experiment_dictionary['control_groups'] = ctrl_dict
+
+        # sample_reps, just {sampA:[repA1, repA2], ...}
+        experiment_dictionary['sample_reps'] = {
+            k:list(v.values) for k, v in repdeets.groupby('Sample').groups.items()
+        }
+
+        # Analyses. Producing a list of dicts with "method" and "groups":List
+        #   required keys. Should practically always be a fn_counts, but ignore
+        #   if blank. kwargs & pseudocount added if not present
+        analyses = []
+        for _, row in self.wb['Analyses'].iterrows():
+            for method in safesplit(row['Method']):
+                andict = {'method':method,
+                          'groups':safesplit(row['Control group'])}
+
+                if 'kwargs' not in andict:
+                    andict['kwargs'] = {}
+
+                if row['Add pseudocount']:
+                    andict['pseudocount'] = int(row['Add pseudocount'])
+                else:
+                    andict['pseudocount'] = 1
+                if row['Counts file']:
+                    andict['counts_file'] = row['Counts file']
+
+                # add default args if any
+                if not row['Arguments']:
+                    if method == 'mageck':
+                        pc = andict['pseudocount']
+                        if pc > 1:
+                            cutoff = 2*pc
+                        else:
+                            cutoff = 0
+                        andict['kwargs'] = {'remove-zero':'both',
+                                            'remove-zero-threshold':cutoff}
+                else:
+                    rowargs = row['Arguments']
+                    try:
+                        kwargs = eval(rowargs)
+                        if not type(kwargs) is  dict:
+                            raise RuntimeError()
+                    except:
+                        # try parsing as command line options
+                        kwargs = clargs_to_dict(rowargs)
+                    andict['kwargs'] = kwargs
+
+                # deal with paired, which is handled different in the programs
+                if row['Paired'] and (method == 'mageck'):
+                    andict['kwargs']['paired'] = ''
+                elif not row['Paired'] and (method == 'drugz'):
+                    andict['kwargs']['unpaired'] = True
+
+                analyses.append(andict)
+        experiment_dictionary['analyses'] = analyses
+
+        for k, v in additional_options.items():
+            experiment_dictionary[k] = v
+
+        if 'file_prefix' not in experiment_dictionary:
+            experiment_dictionary['file_prefix'] = experiment_dictionary['experiment_id']
+
+        return experiment_dictionary
 
 
 
@@ -129,8 +280,8 @@ def call_drugZ_batch(sample_reps:Dict[str, list],
                      control_map:Dict[str, list],
                      counts_file:str,
                      prefix:str,
-                     pseudocount:1,
-                     kwargs:dict=None, ):
+                     kwargs:dict=None,
+                     pseudocount=1,):
     """output files written to {file_prefix}.{ctrl}-{treat}.tsv
 
     One file per comparison, in the default drugz format. Use tabulate_drugz to
@@ -254,38 +405,26 @@ def call_mageck_batch(sample_reps:Dict[str, list],
 
             call_mageck(ctrl_samp, treat, sample_reps, counts_file, prefix, kwargs)
             mageck_pairs_done.append((ctrl_samp, treat))
-        # # EXTRA
-        # if not skip_extra_mageck:
-        #     # run all combinations of samples that share at least one control sample
-        #     # replace the control group name in the string
-        #     pref_split = prefix.split('.')
-        #     pref_split[-2] = 'EXTRA'
-        #     prefix_extra = '.'.join(pref_split)
-        #     for c, t in combinations(treat_samples, 2):
-        #         if (c, t) not in mageck_pairs_done and (t, c) not in mageck_pairs_done:
-        #             mageck_pairs_done.append((c, t))
-        #             # maybe don't tablulate these at the moment.
-        #             call_mageck(c, t, sample_reps, counts_file, prefix_extra, kwargs)
+
     # delete the file with additional pseudocount, if there is one.
     if tmp_fn is not None:
         os.remove(tmp_fn)
 
-def validate_expd(expd:dict):
-    pass
-
-
+# When adding new functions, need to deal with pseudocount option in the main func
+#   and pairedness in the AnalysisWorkbook
 analysis_functions = {'mageck':call_mageck_batch, 'drugz':call_drugZ_batch}
 analysis_tabulate = {'mageck':tabulate_mageck, 'drugz':tabulate_drugz}
 available_analyses = analysis_functions.keys()
 
-def iter_comps(comparisons: List[dict], tab: pd.DataFrame=None):
-    for comparison in comparisons:
-        for ctrl_samp, comp_samps in comparison.items():
-            for comp in comp_samps:
-                if tab is not None:
-                    if comp not in tab.columns or ctrl_samp not in tab.columns:
-                        continue
-                yield ctrl_samp, comp
+
+# def iter_comps(comparisons: List[dict], tab: pd.DataFrame=None):
+#     for comparison in comparisons:
+#         for ctrl_samp, comp_samps in comparison.items():
+#             for comp in comp_samps:
+#                 if tab is not None:
+#                     if comp not in tab.columns or ctrl_samp not in tab.columns:
+#                         continue
+#                 yield ctrl_samp, comp
 
 
 def process_control_map(controls, samples):
@@ -342,7 +481,7 @@ def validate_required_arguments(arguments:dict):
 
 
     # check the required top level options are all present
-    required_options = ['sample_reps', 'experiment_id', 'analysis_version', 'counts_file',
+    required_options = ['sample_reps', 'experiment_id', 'analysis_version',
                         'file_prefix', 'control_groups', 'analyses']
     option_is_missing = lambda op: (op not in arguments.keys()) or (not arguments[op])
     missing_options = [op for op in required_options if option_is_missing(op)]
@@ -350,6 +489,7 @@ def validate_required_arguments(arguments:dict):
         raise RuntimeError(
             f'Required options missing (or valueless) from config file: {",".join(missing_options)}'
         )
+
 
     # check the required analyses options present
     required_analysis_opts = ['method']
@@ -387,9 +527,9 @@ def validate_required_arguments(arguments:dict):
     if missing_samples:
         raise RuntimeError(f"Samples named in control_groups missing in sample_reps:\n{', '.join(missing_samples)}")
 
-def process_arguments(arguments:dict):
-    """deal with special keywords from the experiment yaml, and allow some
-    ambiguous syntax in the yaml. Also do some checking of validity"""
+def process_arguments(arguments:dict) -> dict:
+    """Deal with special keywords from the experiment dictionary.
+    Varefy integrity of options."""
     # (currently optional arguments are handled in the pipeline, but
     #  alternatively I could have them set here
     #  so changes to how the arguments
@@ -418,40 +558,73 @@ def process_arguments(arguments:dict):
     for r in arguments['sample_reps'].values():
         reps_list.extend(r)
 
-    with open(arguments['counts_file']) as f:
-        line = next(f)
-        if not '\t' in line:
-            raise ConfigurationError(
-                f"No tabs in first line of count file {arguments['counts_file']}"+
-                f", is it comma seperated?\n\t{line}"
-            )
-        # check for missing/miss-spelled replicates
-        cnt_reps = line.strip().split('\t')
-        missing_reps = [r for r in reps_list if r not in cnt_reps]
-        if missing_reps:
-            raise ValueError(
-                f"These replicates not found in count file: {missing_reps}"
-                f"\nCount columns: {', '.join(cnt_reps)}"
-            )
+    # get list of all counts files used
+    counts_files = set()
+    counts_not_top_level = False
+    try:
+        # this top level not required
+        counts_files.add(arguments['counts_file'])
+    except KeyError:
+        counts_not_top_level = True
 
-    # turn the csv analyses into an actual list
-    for k in 'skip_groups', 'skip_analyses':
-        if (k in arguments) and arguments[k]:
-            arguments[k] = arguments[k].split(',')
+    # add analysis specific counts files, also check method exists
+    for ans in arguments['analyses']:
+        if 'counts_file' in ans:
+            counts_files.add(ans['counts_file'])
+        else:
+            if counts_not_top_level:
+                raise PipelineOptionsError('No counts file set for analysis')
+        method = ans['method']
+        if method not in available_analyses:
+            raise PipelineOptionsError(f'Unknown method: "{method}" specified.')
+
+
+    # Check a counts file has been specified
+    counts_files = list(counts_files)
+    if not counts_files:
+        raise PipelineOptionsError('No counts file set for analysis')
+
+    for cfn in counts_files:
+        with open(cfn) as f:
+            line = next(f)
+            if not '\t' in line:
+                raise PipelineOptionsError(
+                    f"No tabs in first line of count file {cfn}"+
+                    f", is it comma seperated?\n\t{line}"
+                )
+            # check for missing/miss-spelled replicates
+            cnt_reps = line.strip().split('\t')
+            missing_reps = [r for r in reps_list if r not in cnt_reps]
+            if missing_reps:
+                raise ValueError(
+                    f"These replicates not found in count file: {missing_reps}"
+                    f"\nCount columns: {', '.join(cnt_reps)}"
+                )
+
+    # Control groups to be included, defaults to all if None
+    if 'run_groups' not in arguments:
+        arguments['run_groups'] = None
+    run_groups = arguments['run_groups']
+    if run_groups is not None:
+        if type(run_groups) is str:
+            arguments['run_groups'] = run_groups.split(',')
+
+
+
     return arguments
 
 
-def run_analyses(counts_file, output_dir, file_prefix,
+def run_analyses(output_dir, file_prefix,
                  sample_reps:Dict[str, list],
                  control_groups:Dict[str, Dict[str, list]],
                  analyses:List[dict],
                  methods_kwargs:Dict=None,
-                 dont_log=False,
+                 dont_log=False, #todo replace dont_log with some kind of verbosity thing
                  compjoiner='-', #tools.ARROW,
                  use_group_as_label=False,
                  notes='',
                  skip_analyses=None,
-                 skip_groups=None):
+                 run_groups:List[str]=None, counts_file=None):
 
     """Run batches of CRISPR analyses."""
 
@@ -460,8 +633,12 @@ def run_analyses(counts_file, output_dir, file_prefix,
 
     if skip_analyses is None:
         skip_analyses = []
-    if skip_groups is None:
-        skip_groups = []
+
+    if run_groups is None:
+        group_included = lambda x: True
+    else:
+        group_included = lambda x: x in run_groups
+        pipeLOG.info(f'Running only control groups: {run_groups}')
 
     # Create the root experiment directory
     # Can't make directory and subdir at the same time, so iterate through the tree
@@ -504,6 +681,11 @@ def run_analyses(counts_file, output_dir, file_prefix,
         if analysis_method in skip_analyses:
             pipeLOG.info(f"Skipping analysis method {analysis_method}")
             continue
+
+        # The structure here (which may be pointlessly complicated) is that
+        #   default arguments for an analysis method can be set at the top
+        #   level of the JSON, but individual analysis_dicts may contain
+        #   arguments that override these.
         try:
             default_method_kwargs = methods_kwargs[analysis_method]
         except:
@@ -515,13 +697,6 @@ def run_analyses(counts_file, output_dir, file_prefix,
         else:
             groups = analysis_dict['groups']
 
-        # These kwargs set at the analysis level, can be overridden by args at
-        #   the control group level. New, analysis level, args overwrite experiment
-        #   level args
-        # try:
-        #     curr_kwargs = {**default_method_kwargs, **analysis_dict['kwargs']}
-        # except KeyError:
-        #     curr_kwargs = copy(default_method_kwargs)
         try:
             if analysis_dict['kwargs']:
                 curr_kwargs = analysis_dict['kwargs']
@@ -530,10 +705,9 @@ def run_analyses(counts_file, output_dir, file_prefix,
         except KeyError:
             curr_kwargs = default_method_kwargs
 
-
         # go through the selected groups for this analysis and run the thing
         for grp in groups:
-            if grp in skip_groups:
+            if not group_included(grp):
                 pipeLOG.info(f"Skipping group {grp}")
                 continue
             if use_group_as_label:
@@ -557,9 +731,13 @@ def run_analyses(counts_file, output_dir, file_prefix,
             get_prefix = lambda out_type: str(Path(output_dir, analysis_method, out_type, f"{file_prefix}{labstr}"))
             # all these things must have the same signature
             out_prefix = get_prefix('files')
-            ran_analyses.add((analysis_method, out_prefix, f"{file_prefix}{labstr}"))
+
+            # info for tabulating results after the fact.
+            ran_analyses.add(
+                (analysis_method, out_prefix, f"{file_prefix}{labstr}")
+            )
             analysis_func = analysis_functions[analysis_method]
-            analysis_func(sample_reps, ctrl_map, curr_counts, out_prefix, curr_kwargs)
+            analysis_func(sample_reps, ctrl_map, curr_counts, out_prefix, curr_kwargs, )
 
         # tabulate the analyses
         for analysis_method, results_prefix, table_file_prefix in list(ran_analyses):
@@ -569,8 +747,8 @@ def run_analyses(counts_file, output_dir, file_prefix,
             tab.to_csv(tabfn, encoding='utf-8-sig')
 
 
-
 if __name__ == '__main__':
+
     print(__version__)
     parser = argparse.ArgumentParser(
         description="Run mageck and jacks analyses using a JSON file.\n "
@@ -578,10 +756,11 @@ if __name__ == '__main__':
     )
 
     parser.add_argument(
-        'config_file', metavar='JSON_PATH',
-        help = "path to .json file specifying arguments. At a minimum must contain `sample_reps`"
-                  ", `analyses` & `control_groups` keywords and values. "
-                  "Other options may be overridden by command line arguments."
+        'config_file', metavar='EXCEL_OR_JSON',
+        help = ("path to .xlsx or .json file specifying arguments. JSON must must contain `sample_reps`"
+                ", `analyses` & `control_groups` keywords and values. If passing an excel, --analysis-version"
+                " must be set. "
+                "Other options may be overridden by command line arguments.")
         )
     parser.add_argument('--counts', metavar='COUNTS', help='Path to counts file',
                         default=None, dest='counts_file')
@@ -592,30 +771,39 @@ if __name__ == '__main__':
                         help="String to form identifying prefix for all files generated.")
     parser.add_argument('--skip-analyses', metavar='list,of,progs', default=None,
                         help='Filter analyses to be run.')
-    parser.add_argument('--skip-groups', metavar='list,of,groups', default=None,
-                        help='Filter control groups (as defined in exp dict) to be included.')
+    parser.add_argument('--run-groups', metavar='list,of,groups', default=None,
+                        help='Specify control groups (as defined in exp dict) to be included.')
     parser.add_argument('--dont-log', action='store_true', dest='dont_log', default=None,
                         help="Don't write a log file.")
+    parser.add_argument('--analysis-version', default=None,
+                        help='Output files will be stored in a directory of the above name, within the experiment dir.')
 
     # get arguments from the command line and the YAML
     clargs = parser.parse_args() # need to assign this before calling vars() for some reason
     cmd_line_args = vars(clargs)
+    file_prefix = cmd_line_args['file_prefix']
+    if file_prefix is None:
+         file_prefix = ''
 
     # load the configuration file, stripping out the "comment" lines
     config_file = cmd_line_args['config_file']
-    json_str = '\n'.join([l for l in open(config_file) if l.replace(' ', '')[0] != '#'])
+    if config_file.endswith('xlsx'):
+        config_file_args = AnalysisWorkbook(config_file).workbook_to_dict()
+    elif config_file.endswith('json'):
+        json_str = '\n'.join([l for l in open(config_file) if l.replace(' ', '')[0] != '#'])
 
-    def dict_raise_on_duplicates(ordered_pairs):
-        """Reject duplicate keys."""
-        d = {}
-        for k, v in ordered_pairs:
-            if k in d:
-                raise ValueError("Duplicate key in JSON: %r" % (k,))
-            else:
-                d[k] = v
-        return d
-
-    config_file_args = json.loads(json_str, object_pairs_hook=dict_raise_on_duplicates)
+        def dict_raise_on_duplicates(ordered_pairs):
+            """Reject duplicate keys."""
+            d = {}
+            for k, v in ordered_pairs:
+                if k in d:
+                    raise ValueError("Duplicate key in JSON: %r" % (k,))
+                else:
+                    d[k] = v
+            return d
+        config_file_args = json.loads(json_str, object_pairs_hook=dict_raise_on_duplicates)
+    else:
+        raise RuntimeError(f"Unrecognised file type: {config_file}. Only accepts .json or .xlsx")
 
     # over write yml_args with any specified in the command line
     for k, v in cmd_line_args.items():
@@ -628,12 +816,8 @@ if __name__ == '__main__':
     # These don't need to be passed to the pipeline.
     for k in ['config_file', 'notes', 'experiment_id', 'analysis_version',
               'labels']:
-        try:
+        if k in args:
             del args[k]
-        # if it doesn't exist...
-        except KeyError:
-            # we don't need to delete it
-            pass
 
     run_analyses(**args)
 
