@@ -25,14 +25,14 @@ LOG.addHandler(stream_handler)
 """Functions for counting and mapping reads from multiple FASTQ files
 to some kind of sequence library, e.g. a CRISPR guide library. 
 Merging counts assumes that FQ filenames are in the format 
-{sample_name}_L???_R1_001.fastq[.gz]
+{sample_name}_L00?_R1_001.fastq[.gz]
 and that the sequence to be mapped is in the same position in every read
 (including the entire read being the sequence).
-
 Produces dereplicated sequence counts (one file per sample) and then a single
 file containing reads mapped to guide/gene from a library file."""
 
-__version__ = '1.8.0'
+__version__ = '1.8.1'
+# 1.8.1 bugfix in merge samples. Won't work with runs that have more than 9 lanes
 # 1.8.0 added back fuzzy matching, more efficiently this time
 # 1.7.0 adding permenant logging
 # 1.6.0 removed fuzzy counting
@@ -267,7 +267,7 @@ def count_batch(fn_or_dir, slicer, fn_prefix='', seq_len=None, seq_offset=0, fn_
     if merge_samples:
         samples = set([f.split('_L001_')[0].split('/')[-1] for f in file_list if '_L001_' in f])
 
-        file_dict = {s:[f for f in file_list if s in f] for s in samples}
+        file_dict = {s:[f for f in file_list if s+'_L00' in f] for s in samples}
         message_samples = ['Samples found:']
         for k,v in file_dict.items():
             message_samples.append(k)
