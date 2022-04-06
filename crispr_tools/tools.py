@@ -246,7 +246,7 @@ def tabulate_mageck(prefix, compjoiner=ARROW):
             tab.loc[~pos, tabk] = mtab.loc[~pos, f'neg|{stat}']
             tab.loc[:, f'{tabk}_log10'] = tab[tabk].apply(lambda x: -np.log10(x))
 
-        sampnm = fn.split(prefix.stem)[1].split('.gene_s')[0].replace('-', compjoiner).replace('.', '')
+        sampnm = fn.split(prefix.stem, 1)[1].split('.gene_s')[0].replace('-', compjoiner).replace('.', '')
         tables[sampnm] = tab
     if tab is None:
         raise FileNotFoundError('Failed to find any .gene_summary.txt files with prefix '+str(prefix))
@@ -275,7 +275,7 @@ def tabulate_drugz(prefix, compjoiner=ARROW):
     for fn in iter_files_by_prefix(prefix):
         # crop the fn removing the filename part of the prefix, and the file extension
         #  this is the comparison
-        comp = fn.split(prefix.stem)[1][:-4].replace('-', compjoiner).replace('.', '')
+        comp = fn.split(prefix.stem, 1)[1][:-4].replace('-', compjoiner).replace('.', '')
 
         tab = pd.read_csv(os.path.join(os.path.split(prefix)[0], fn), sep='\t', index_col=0)
 
