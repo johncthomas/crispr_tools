@@ -16,8 +16,10 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from crispr_tools import qc, tools, jacks_tools
+from crispr_tools import qc, tools, jacks_tools, version
 import pprint
+
+# todo don't write drugz tables until everything is run
 
 try:
     from jacks.jacks_io import runJACKS
@@ -44,23 +46,26 @@ pipeLOG.setLevel(logging.INFO)
 #logging.getLogger('matplotlib').setLevel(logging.WARNING)
 
 #from crispr_tools.count_reads import count_reads, count_batch, map_counts
-from crispr_tools.tools import plot_read_violins, plot_ROC, plot_volcano, tabulate_mageck, tabulate_drugz
-from crispr_tools.jacks_tools import tabulate_score, scores_scatterplot, mahal_nocov
+#from crispr_tools.tools import plot_read_violins, plot_ROC, plot_volcano, tabulate_mageck, tabulate_drugz
+from crispr_tools.tools import tabulate_mageck, tabulate_drugz
+#from crispr_tools.jacks_tools import tabulate_score, scores_scatterplot, mahal_nocov
 from crispr_tools.version import __version__
 
+#todo analysis programs should be defined as classes that do the following:
+    # handle kwargs, have a .call method, have a .tabulate_results method,
+    # write tables for the screen viewer
+    # have phenotype and significance scores available as same attributes,
+    # inheret from class that has comparison selection built in
+    #   i.e. where you pass two samples and get a result
+    # a short name attribute
+    # This would make it more easy to add new analyses and mean that
+    #   I stop scattering around the parts of what should be a unified concept.
 
-#todo: refactor the analysis so it's modulor and not just a massive function
-#todo check validity of every file and option before starting.
-#  eg:
-#   do all reps exsist in the count file
-#   are samples in controls defined in the sample reps
-#todo handle different analyses better, making it easy to add new ones and turn of during analysis
-#todo Either run_{method} or call_{method}
-    # in particular there should be functions for each that take the exact same arguments.
-
-
-
-
+#todo test excel kwargs
+#todo clear up how args are processed when going through a workbook is unclear
+    # process_workbook (counts_file from cmd line passed separately - what else needs to be passed?)
+    # the dictionary from above passed to process args
+    # other command line args applied
 
 def clargs_to_dict(argstring) -> Dict[str, str]:
     """process command line args of format:
@@ -81,7 +86,7 @@ def clargs_to_dict(argstring) -> Dict[str, str]:
                 kwargs[key] = splitargs[i+1]
     return kwargs
 
-#todo test excel kwargs
+
 
 class AnalysisWorkbook:
     """Parse the excel sheet describing how an experiment should be analysed.
@@ -94,12 +99,15 @@ class AnalysisWorkbook:
 
     def __init__(self, xlfn, parse_workbook=True, **additional_options):
         #self.xpk = 'Experiment details'
+        self.fn = xlfn
         self.wb = self.load_analysis_workbook(xlfn)
         if parse_workbook:
             self.expd = self.workbook_to_dict(**additional_options)
 
-    def varefy_wb_integrity(self):
-        assert not self.wb['Sample details'].index.duplicated().any()
+
+    # could be useful
+    # def varefy_wb_integrity(self):
+    #     assert not self.wb['Sample details'].index.duplicated().any()
 
     def load_analysis_workbook(self, fn):
         # nothing needs to be numeric
@@ -117,9 +125,30 @@ class AnalysisWorkbook:
 
         return wb
 
-    def workbook_to_dict(self, **additional_options):
+    def workbook_to_dict(self,  **additional_options):
         # couple of options are cells that can contain comma split values
         # pretty easy to inadvertently slip a space in there...
+        pipeLOG.info(f'Parsing xlsx: {self.fn}')
+
+        counts_prefix = ''
+        if 'counts_file' in additional_options:
+            counts_file = additional_options['counts_file']
+
+            # if this is a path that should be prepended to path specified
+            #  in analyses sheet
+            if os.path.isdir(counts_file):
+                pipeLOG.info(f'Counts file location: {counts_file}')
+                counts_prefix = counts_file
+
+            # if it's not a file we want rid of it
+            # if it is, it will be added from additional_options at the end
+            if not os.path.isfile(counts_file):
+                del additional_options['counts_file']
+
+            if counts_file and (not os.path.exists(counts_file)):
+                pipeLOG.warning(f"Counts path: {counts_file} is not a file or directory.")
+
+        # Remove pesky unintended whitespace.
         safesplit = lambda x: x.replace(' ', '').split(',')
 
         repdeets = self.wb['Sample details']
@@ -128,6 +157,8 @@ class AnalysisWorkbook:
         # all "Experiment details" k:v are top level and don't need processing
         experiment_dictionary = {}
 
+        # Some expd options will be in the workbook, store them with the appropriate
+        #  internal key
         deets = self.wb['Experiment details'].to_dict()
         for wbk, jsonk in {'Experiment name': 'experiment_id',
                        'Analysis version': 'analysis_version',
@@ -140,7 +171,7 @@ class AnalysisWorkbook:
                 #   will get picked up later
                 pass
 
-        # control groups. Results in:
+        # control groups. Yields:
         # {grpA:{ctrl_samp:[test_samp1, test_samp2, ...], ...}, ...}
         ctrl_dict = {}
         for grpn in ctrlgrps.Group.unique():
@@ -161,6 +192,7 @@ class AnalysisWorkbook:
         #   required keys. Should practically always be a fn_counts, but ignore
         #   if blank. kwargs & pseudocount added if not present
         analyses = []
+
         for _, row in self.wb['Analyses'].iterrows():
             for method in safesplit(row['Method']):
                 andict = {'method':method,
@@ -168,13 +200,15 @@ class AnalysisWorkbook:
 
                 if 'kwargs' not in andict:
                     andict['kwargs'] = {}
-
                 if row['Add pseudocount']:
                     andict['pseudocount'] = int(row['Add pseudocount'])
                 else:
                     andict['pseudocount'] = 1
                 if row['Counts file']:
-                    andict['counts_file'] = row['Counts file']
+                    andict['counts_file'] = os.path.join(
+                        counts_prefix,
+                        row['Counts file']
+                    )
 
                 # add default args if any
                 if not row['Arguments']:
@@ -338,7 +372,6 @@ def call_mageck(control_samp:str, treat_samp:str, sample_reps:Dict[str, List[str
         prefix: Prefix added to all created files, should include desired output dir.
         kwargs: Keyword arguments to be passed on to mageck. If kwarg is flag it should
             be in the format {'flag-kwarg':''}
-
     """
     mageck_str = "mageck test -k {counts} -t {treat} -c {ctrl} -n {outprefix}.{ctrlnm}-{sampnm}"
     # get the replicate strings
@@ -478,18 +511,16 @@ def validate_required_arguments(arguments:dict):
 
     If validation fails, raise a RuntimeError"""
 
-
-
     # check the required top level options are all present
     required_options = ['sample_reps', 'experiment_id', 'analysis_version',
-                        'file_prefix', 'control_groups', 'analyses']
+                         'analyses', 'file_prefix',]
+
     option_is_missing = lambda op: (op not in arguments.keys()) or (not arguments[op])
     missing_options = [op for op in required_options if option_is_missing(op)]
     if missing_options:
         raise RuntimeError(
             f'Required options missing (or valueless) from config file: {",".join(missing_options)}'
         )
-
 
     # check the required analyses options present
     required_analysis_opts = ['method']
@@ -749,20 +780,21 @@ def run_analyses(output_dir, file_prefix,
 
 if __name__ == '__main__':
 
-    print(__version__)
+    pipeLOG.info(str(__version__))
     parser = argparse.ArgumentParser(
         description="Run mageck and jacks analyses using a JSON file.\n "
                     "Use arguments below to override JSON options"
     )
 
     parser.add_argument(
-        'config_file', metavar='EXCEL_OR_JSON',
+        'config_file', metavar='FILE',
         help = ("path to .xlsx or .json file specifying arguments. JSON must must contain `sample_reps`"
                 ", `analyses` & `control_groups` keywords and values. If passing an excel, --analysis-version"
                 " must be set. "
                 "Other options may be overridden by command line arguments.")
         )
-    parser.add_argument('--counts', metavar='COUNTS', help='Path to counts file',
+    parser.add_argument('--counts', metavar='FILE/DIR',
+                        help='Path to counts file, or directory containing counts file specified in config_file',
                         default=None, dest='counts_file')
     parser.add_argument('--output-dir', metavar='PATH', default='.',
                         help=('Path to where results directory will be created if not current'
@@ -781,14 +813,24 @@ if __name__ == '__main__':
     # get arguments from the command line and the YAML
     clargs = parser.parse_args() # need to assign this before calling vars() for some reason
     cmd_line_args = vars(clargs)
+
+
     file_prefix = cmd_line_args['file_prefix']
     if file_prefix is None:
          file_prefix = ''
 
-    # load the configuration file, stripping out the "comment" lines
+    # Load the configuration file
     config_file = cmd_line_args['config_file']
     if config_file.endswith('xlsx'):
-        config_file_args = AnalysisWorkbook(config_file).workbook_to_dict()
+        if cmd_line_args['counts_file'] is not None:
+            cntfn = cmd_line_args['counts_file']
+            del cmd_line_args['counts_file']
+            config_file_args = AnalysisWorkbook(config_file,  counts_file = cntfn).expd
+        else:
+            config_file_args = AnalysisWorkbook(config_file).expd
+
+
+    # Stripping out the "comment" lines
     elif config_file.endswith('json'):
         json_str = '\n'.join([l for l in open(config_file) if l.replace(' ', '')[0] != '#'])
 
