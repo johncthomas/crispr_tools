@@ -696,12 +696,23 @@ def run_analyses(output_dir, file_prefix,
     # create the directories
     methods_used = list(set([ans['method'] for ans in analyses]))
 
+    def mkdir(p):
+        """os.mkdir but it ignores FileExistsError"""
+        try:
+            os.mkdir(p)
+        except FileExistsError:
+            pass
+
+    mkdir(output_dir)
+    mkdir(str(Path(output_dir, 'tables')))
     for analysis_method in methods_used:
-        call(['mkdir', '-p', str(Path(output_dir, analysis_method))])
+
+        mkdir(str(Path(output_dir, analysis_method)))
+        mkdir(str(Path(output_dir, analysis_method, 'files')))
+        #call(['mkdir', '-p', str(Path(output_dir, analysis_method))])
         #call(['mkdir', str(Path(output_dir, analysis_method, 'tables'))])
-        call(['mkdir', str(Path(output_dir, analysis_method, 'files'))])
-    table_dir = str(Path(output_dir, 'tables'))
-    call(['mkdir', table_dir])
+        #call(['mkdir', str(Path(output_dir, analysis_method, 'files'))])
+
 
     ######################
     ## Run the analyses ##
