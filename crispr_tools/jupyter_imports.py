@@ -1,4 +1,4 @@
-"""Imports things commonly used by the author."""
+"""Imports things commonly used by the author. Might not be of any use to anyone else."""
 
 import platform, pathlib
 import os
@@ -36,11 +36,12 @@ from .tools import (
     hart_list,
     load_analyses_via_expd,
     write_stats_workbook,
-    get_clonal_lfcs,
+    clonal_lfcs,
     load_counts,
-    plot_read_violins,
-    pca_grid
+    abundance_normalise
 )
+
+from .plotting import pca_grid, plot_read_violins, plot_ROC
 
 from sklearn.metrics import precision_recall_curve
 from sklearn.decomposition import PCA
@@ -78,8 +79,14 @@ ARROW = '→'
 
 def multipletests_fdr(ps, method='fdr_bh', **kwargs):
     """Calls statsmodels.stats.multipletests and returns the corrected
-    p-values only, with default of fdr_bh, rather than a FWER method."""
+    p-values only, with default of fdr_bh, rather than a FWER method.
+    """
     kwargs['method'] = method
+    try:
+        if ps.isna().any():
+            raise RuntimeError('ps contains NAN, this will break it')
+    except AttributeError:
+        pass
     qs = sm.stats.multipletests(ps, **kwargs)[1]
     if type(ps) == pd.core.series.Series:
         return pd.Series(qs, index=ps.index)
@@ -313,3 +320,5 @@ def minminmaxmax(x,y):
     nn = min([min(x), min(y)])
     xx = max([max(x), max(y)])
     return (nn, xx)
+
+nlprint = lambda x: print('\n'.join(x))
