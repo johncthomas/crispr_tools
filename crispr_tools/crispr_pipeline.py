@@ -14,12 +14,15 @@ from attrdict import AttrDict
 import yaml
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 
 from crispr_tools import qc, tools, jacks_tools, version
 import pprint
 
 # todo don't write drugz tables until everything is run
+# have default prefix
+# outdir + prefix issue if both not local (tests should include weird combinations)
+
 
 try:
     from jacks.jacks_io import runJACKS
@@ -32,6 +35,7 @@ except ImportError:
         raise ModuleNotFoundError('JACKS not installed!!!')
 
 from crispr_tools.drugz import drugZ_analysis
+
 from crispr_tools.tools import list_not_str
 
 # with open(pathlib.Path(__file__).parent/'version.txt') as f:
@@ -44,6 +48,7 @@ class PipelineOptionsError(Exception):
 pipeLOG = logging.getLogger('pipeline')
 pipeLOG.setLevel(logging.INFO)
 #logging.getLogger('matplotlib').setLevel(logging.WARNING)
+
 
 #from crispr_tools.count_reads import count_reads, count_batch, map_counts
 #from crispr_tools.tools import plot_read_violins, plot_ROC, plot_volcano, tabulate_mageck, tabulate_drugz
@@ -126,15 +131,14 @@ class AnalysisWorkbook:
         return wb
 
     def workbook_to_dict(self,  **additional_options):
-        # couple of options are cells that can contain comma split values
-        # pretty easy to inadvertently slip a space in there...
+
         pipeLOG.info(f'Parsing xlsx: {self.fn}')
 
         counts_prefix = ''
         if 'counts_file' in additional_options:
             counts_file = additional_options['counts_file']
 
-            # if this is a path that should be prepended to path specified
+            # if this is a path, that should be prepended to path specified
             #  in analyses sheet
             if os.path.isdir(counts_file):
                 pipeLOG.info(f'Counts file location: {counts_file}')
@@ -171,7 +175,7 @@ class AnalysisWorkbook:
                 #   will get picked up later
                 pass
 
-        # control groups. Yields:
+        # control groups. produces:
         # {grpA:{ctrl_samp:[test_samp1, test_samp2, ...], ...}, ...}
         ctrl_dict = {}
         for grpn in ctrlgrps.Group.unique():
@@ -192,18 +196,24 @@ class AnalysisWorkbook:
         #   required keys. Should practically always be a fn_counts, but ignore
         #   if blank. kwargs & pseudocount added if not present
         analyses = []
-
+        pipeLOG.info('workbook_to_dict: Processing analyses')
         for _, row in self.wb['Analyses'].iterrows():
+            pipeLOG.debug(str(row))
             for method in safesplit(row['Method']):
                 andict = {'method':method,
                           'groups':safesplit(row['Control group'])}
 
                 if 'kwargs' not in andict:
                     andict['kwargs'] = {}
+
+
                 if row['Add pseudocount']:
-                    andict['pseudocount'] = int(row['Add pseudocount'])
+                    psdc = int(row['Add pseudocount'])
                 else:
-                    andict['pseudocount'] = 1
+                    psdc = 1
+                andict['pseudocount'] = psdc
+
+
                 if row['Counts file']:
                     andict['counts_file'] = os.path.join(
                         counts_prefix,
@@ -223,13 +233,16 @@ class AnalysisWorkbook:
                 else:
                     rowargs = row['Arguments']
                     try:
+
                         kwargs = eval(rowargs)
                         if not type(kwargs) is  dict:
                             raise RuntimeError()
                     except:
+                        pipeLOG.info(f"Parsing analysis Arguments, {rowargs}, as command line style")
                         # try parsing as command line options
                         kwargs = clargs_to_dict(rowargs)
                     andict['kwargs'] = kwargs
+                    pipeLOG.info(f"Arguments: {rowargs} parsed to {kwargs}")
 
                 # deal with paired, which is handled different in the programs
                 if row['Paired'] and (method == 'mageck'):
@@ -315,11 +328,26 @@ def call_drugZ_batch(sample_reps:Dict[str, list],
                      counts_file:str,
                      prefix:str,
                      kwargs:dict=None,
-                     pseudocount=1,):
+                     pseudocount=1,
+                     drop_guide_less_than=0,
+                     drop_guide_type=None):
     """output files written to {file_prefix}.{ctrl}-{treat}.tsv
 
     One file per comparison, in the default drugz format. Use tabulate_drugz to
-    get a standardised table"""
+    get a standardised table
+
+    use drop_guide_* args remove guides that appear below given abundance.
+    Valid drop_guide_type is 'any', 'all'. These can also be set via kwargs."""
+
+    try:
+        drop_guide_less_than = int(kwargs['drop_guide_less_than'])
+        drop_guide_type = kwargs['drop_guide_type']
+    except KeyError:
+        pass
+
+    if drop_guide_less_than:
+        assert drop_guide_type in ('any', 'all', 'both')
+
     kwargs = kwargs
     if kwargs is None:
         kwargs = {}
@@ -339,6 +367,15 @@ def call_drugZ_batch(sample_reps:Dict[str, list],
     dzargs.remove_genes = None
     dzargs.update(kwargs)
 
+    # To drop guides we will be writing new temp count files using
+    #   this DF.
+    if drop_guide_less_than:
+        tmpfn = f'{prefix}.tmp_hsfdok.tsv'
+        dzargs.infile = tmpfn
+        cnt = pd.read_csv(counts_file, index_col=0, sep='\t')
+
+
+    # go through control and treatments to be analysed
     for ctrl_samp, treat_samples in control_map.items():
 
         dzargs.control_samples = ','.join(
@@ -354,8 +391,29 @@ def call_drugZ_batch(sample_reps:Dict[str, list],
 
             dzargs.drugz_output_file = f"{prefix}.{ctrl_samp}-{treat_samp}.tsv".replace('//', '/')
 
+            if drop_guide_less_than:
+                reps = list_not_str(sample_reps[ctrl_samp]) \
+                       + list_not_str(sample_reps[treat_samp])
+
+                cnt_lessthan = (cnt.loc[:, reps] < drop_guide_less_than)
+                # if add more types here, add new keywords to assertion at top of func
+                if drop_guide_type == 'any':
+                    bad_guides = cnt_lessthan.any(1)
+                #elif drop_guide_type in ('both', 'all'):
+                else:
+                     bad_guides = cnt_lessthan.all(1)
+
+                cnt.loc[~bad_guides, ['gene']+reps].to_csv(tmpfn, sep='\t')
+                pipeLOG.info(
+                    f"call_drugZ_batch: {sum(bad_guides)} guides removed "
+                    f"from {ctrl_samp}-{treat_samp}, using less than {drop_guide_less_than} "
+                    f"with '{drop_guide_type}' method."
+                )
+
             drugZ_analysis(dzargs)
 
+    if drop_guide_less_than:
+        os.remove(tmpfn)
     pipeLOG.info('Finished drugZ')
 
 
@@ -478,9 +536,10 @@ def process_control_map(controls, samples):
                 # maybe could have other keywords in the future
                 samps = [s for s in samples if s not in samps['EXCEPT']]
             ctrlmap[ctrl] = samps
+
     return controls
 
-
+#todo do we need to check for multiple controls anymore without jacks?
 def check_multicontrol_to_treat(control_map):
     """Check if a single treatment sample is paired to multiple controls
     (which is not allowed by JACKS at least).
@@ -558,9 +617,12 @@ def validate_required_arguments(arguments:dict):
     if missing_samples:
         raise RuntimeError(f"Samples named in control_groups missing in sample_reps:\n{', '.join(missing_samples)}")
 
-def process_arguments(arguments:dict) -> dict:
+def process_arguments(arguments:dict, delete_unrequired_args=True) -> dict:
     """Deal with special keywords from the experiment dictionary.
-    Varefy integrity of options."""
+    Varefy integrity of options.
+
+    If delete_unrequired_args, arguments that come from AnalysisWorkbook
+    but not required by run_analyses are removed."""
     # (currently optional arguments are handled in the pipeline, but
     #  alternatively I could have them set here
     #  so changes to how the arguments
@@ -640,7 +702,12 @@ def process_arguments(arguments:dict) -> dict:
         if type(run_groups) is str:
             arguments['run_groups'] = run_groups.split(',')
 
-
+    # These don't need to be passed to the pipeline.
+    if delete_unrequired_args:
+        for k in ['config_file', 'notes', 'experiment_id', 'analysis_version',
+                  'labels']:
+            if k in arguments:
+                del arguments[k]
 
     return arguments
 
@@ -737,7 +804,7 @@ def run_analyses(output_dir, file_prefix,
         if 'groups' not in analysis_dict:
             groups = {g:{} for g in control_groups.keys()}
         else:
-            groups = analysis_dict['groups']
+            groups = list_not_str(analysis_dict['groups'])
 
         try:
             if analysis_dict['kwargs']:
@@ -866,11 +933,7 @@ if __name__ == '__main__':
     # validate and process arguments
     args = process_arguments(config_file_args)
 
-    # These don't need to be passed to the pipeline.
-    for k in ['config_file', 'notes', 'experiment_id', 'analysis_version',
-              'labels']:
-        if k in args:
-            del args[k]
+
 
     run_analyses(**args)
 
