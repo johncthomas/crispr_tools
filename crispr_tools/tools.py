@@ -189,18 +189,37 @@ def size_factor_normalise(cnt_tab, log=True):
     return out_tab
 
 
+def abundance_normalise(c:pd.DataFrame, pseudocount=1, log2=True, drop_cols=('gene',)):
+    """Returns table with column counts of equal sum.
 
+    Pseudocount of zero will be a problem.
+    """
+    if drop_cols:
+        for col in drop_cols:
+            try:
+                c = c.drop(col, 1)
+            except:
+                pass
 
-def get_ROC_values(series, things_oi):
-    things_oi = things_oi[things_oi.isin(series.index)]
+    lnc = (c/c.sum())*c.sum().median() + pseudocount
+    if log2:
+        lnc = lnc.apply(np.log2)
+    lnc.head()
+    return lnc
 
-    col = series.dropna().sort_values()
+def ROC_values(values:pd.Series, things_oi:pd.Series):
+    """
+    :param values: Series, index with labels, values used to do the ROC
+    :param things_oi: Labels found in values.index that are "true"
+    :return:
+    """
+    things_oi = things_oi[things_oi.isin(values.index)]
+
+    col = values.dropna().sort_values()
     toi = things_oi[things_oi.isin(col.index)]
     y = np.cumsum(col.index.isin(toi)) / len(toi)
     x = np.arange(col.shape[0])/col.shape[0]
     return x, y
-
-
 
 
 revcomp = lambda s: ''.join([dict(zip('ACTGN', 'TGACN'))[nt] for nt in s[::-1]])
@@ -381,7 +400,6 @@ def load_analyses_via_expd(expd_or_yaml:Union[Dict, PathType],
 
 
 def select_clonal_lfc_by_samp(control_samp, treat_samp, lfcs, sample_reps,):
-    #todo make a ClonalLFC object with this as a method
 
     ctrl_reps  = sample_reps[control_samp]
     treat_reps = sample_reps[treat_samp]
@@ -393,8 +411,8 @@ def select_clonal_lfc_by_samp(control_samp, treat_samp, lfcs, sample_reps,):
     return lfcs.loc[:, ctrl_mask.values & treat_mask.values]
 
 
-def get_clonal_lfcs(lncounts, ctrl_dict:dict, sample_reps:dict,
-                    lognorm=False):
+def clonal_lfcs(lncounts, ctrl_dict:dict, sample_reps:dict,
+                lognorm=False):
     """get a DF of clonal LFCs using the ctrl/sample pairs specified by ctrl_dict.
     Assumes that clones are grouped by order of appearance in sample_reps"""
     _lfcs = {}
