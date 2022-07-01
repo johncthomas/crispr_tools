@@ -7,7 +7,7 @@ from crispr_tools import *
 from attrdict import AttrDict
 import os
 from crispr_tools.crispr_pipeline import process_control_map
-from crispr_tools.tools import get_clonal_lfcs
+from crispr_tools.tools import clonal_lfcs
 from copy import copy
 import pathlib
 class CrisprExperiment:
@@ -54,7 +54,7 @@ class CrisprExperiment:
 
         self.clonal_lfc = AttrDict()
         for grp in self.controls:
-            self.clonal_lfc[grp] = get_clonal_lfcs(
+            self.clonal_lfc[grp] = clonal_lfcs(
                 self.lncount,
                 self.controls[grp],
                 self.sample_replicates
