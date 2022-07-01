@@ -1,5 +1,5 @@
 import matplotlib.pyplot as plt
-from crispr_tools.tools import size_factor_normalise, get_ROC_values, get_clonal_lfcs
+from crispr_tools.tools import size_factor_normalise, ROC_values, clonal_lfcs
 import numpy as np
 import pandas as pd
 import seaborn as sns
