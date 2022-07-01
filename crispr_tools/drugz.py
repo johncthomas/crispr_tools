@@ -1,6 +1,5 @@
 #!/usr/bin/env python
-# VERSION = "1.1.0.2"
-# BUILD   = 115
+# VERSION = "modified from 1.1.0.2"
 
 # ---------------------------------
 # DRUGZ:  Identify drug-gene interactions in paired sample genomic perturbation screens
@@ -43,11 +42,11 @@ import pandas as pd
 import scipy.stats as stats
 
 import argparse
-import logging as log
+import logging
 
-log.basicConfig(level=log.INFO)
-log_ = log.getLogger(__name__)
 
+log_ = logging.getLogger(__name__)
+log_.setLevel(logging.WARNING)
 pd.options.mode.chained_assignment = None
 # default='warn' - printing a warning message
 # None - ignoring the warning
