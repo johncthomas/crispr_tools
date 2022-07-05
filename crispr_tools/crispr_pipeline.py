@@ -739,15 +739,8 @@ def run_analyses(output_dir, file_prefix,
         pipeLOG.info(f'Running only control groups: {run_groups}')
 
     # Create the root experiment directory
-    # Can't make directory and subdir at the same time, so iterate through the tree
     p = str(output_dir)
-    for i in range(len(p)):
-        #print(p)
-        d = p.split('/')[:i+1]
-        try:
-            os.mkdir('/'.join(d))
-        except FileExistsError:
-            pass
+    os.makedirs(p, exist_ok=True)
 
     if not dont_log:
         t = '{}-{}-{}_{}h{}m{}s.{}'.format(*datetime.datetime.now().timetuple()[:-1])
