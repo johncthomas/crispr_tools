@@ -483,15 +483,14 @@ if __name__ == '__main__':
 
     #print('v', __version__)
     parser = argparse.ArgumentParser(description='Count unique sequences in FASTQs. Assumes filenames are {sample_name}_L00?_R1_001.fastq[.gz]')
-    parser.add_argument('files', nargs='+',
+    parser.add_argument('files', nargs='+', required=True,
                         help="A list of files or dir. All files in given dir that end with valid suffixes (inc. gzips) will be counted.")
 
-    parser.add_argument('-s', metavar='M,N',
-                        help='Slice indicies to truncate sequences (zero indexed, not end-inclusive). Comma-sep numbers. Required.',
-                        required=True)
+    parser.add_argument('-s', '--slice', metavar='M,N',required=True,
+                        help='Slice indicies to truncate sequences (zero indexed, not end-inclusive). Comma-sep numbers. Required.',)
     parser.add_argument('--suffix', default='.rawcount', metavar='FN_SUFFIX',
                         help="Suffix added to output files, .txt will always be added after. Default `.rawcount`")
-    parser.add_argument('-p',  metavar='FN_PREFIX',
+    parser.add_argument('-p', '--prefix', metavar='FN_PREFIX', required=True,
                         help="Prefix added to output files, can include absolute or relative paths.")
     parser.add_argument('--fn-split', default='_R1_', metavar='STR',
                         help="String used to split filenames and form output file prefix. Default `_R1_`." \
