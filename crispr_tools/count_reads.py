@@ -483,7 +483,7 @@ if __name__ == '__main__':
 
     #print('v', __version__)
     parser = argparse.ArgumentParser(description='Count unique sequences in FASTQs. Assumes filenames are {sample_name}_L00?_R1_001.fastq[.gz]')
-    parser.add_argument('files', nargs='+', required=True,
+    parser.add_argument('files', nargs='+',
                         help="A list of files or dir. All files in given dir that end with valid suffixes (inc. gzips) will be counted.")
 
     parser.add_argument('-s', '--slice', metavar='M,N',required=True,
