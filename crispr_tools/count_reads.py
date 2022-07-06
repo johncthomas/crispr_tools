@@ -488,10 +488,10 @@ if __name__ == '__main__':
 
     parser.add_argument('-s', '--slice', metavar='M,N',required=True,
                         help='Slice indicies to truncate sequences (zero indexed, not end-inclusive). Comma-sep numbers. Required.',)
-    parser.add_argument('--suffix', default='.rawcount', metavar='FN_SUFFIX',
-                        help="Suffix added to output files, .txt will always be added after. Default `.rawcount`")
     parser.add_argument('-p', '--prefix', metavar='FN_PREFIX', required=True,
                         help="Prefix added to output files, can include absolute or relative paths.")
+    parser.add_argument('--suffix', default='.rawcount', metavar='FN_SUFFIX',
+                        help="Suffix added to output files, .txt will always be added after. Default `.rawcount`")
     parser.add_argument('--fn-split', default='_R1_', metavar='STR',
                         help="String used to split filenames and form output file prefix. Default `_R1_`." \
                              "Doesn't do anything if --merge-samples is used.")
@@ -520,11 +520,11 @@ if __name__ == '__main__':
     assert all([os.path.isfile(f) for f in clargs.files])
 
     # slices list of input files, or dir
-    slicer = [int(n) for n in clargs.s.split(',')]
+    slicer = [int(n) for n in clargs.slice.split(',')]
 
     written_fn = count_batch(fn_or_dir=clargs.files,
                              slicer=slicer,
-                             fn_prefix=clargs.p,
+                             fn_prefix=clargs.prefix,
                              fn_suffix=clargs.suffix,
                              fn_split=clargs.fn_split,
                              merge_samples=clargs.merge_samples,
@@ -535,6 +535,6 @@ if __name__ == '__main__':
 
     if clargs.library:
         map_counts(written_fn, clargs.library, report=True, remove_prefix=True,
-                out_fn=clargs.p+'.counts.tsv', splitter=clargs.suffix,
+                out_fn=clargs.prefix+'.counts.tsv', splitter=clargs.suffix,
                 allow_mismatch=clargs.allow_mismatch)
 
