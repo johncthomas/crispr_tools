@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 import os, sys, subprocess
+import typing
+
 import pandas as pd
 from collections import Counter
 import gzip
@@ -60,7 +62,6 @@ __version__ = '1.8.1'
 #todo more information about matches per file, per sample mapping stats
 #todo unmerged counts with identical filenames overwrite each other currently in the
 #todo check library seq len and file seq len match.
-#todo order reps by
 
 
 FILE_FMT = {'a':['.fna', '.fasta', '.fna.gz', '.fasta.gz'],
@@ -103,7 +104,7 @@ def read_fasta(file_obj):
             yield s
 
 
-def count_reads(fn, slicer=(None, None), s_len=None, s_offset=0, file_format='infer') -> Counter:
+def count_reads_from_file(fn, slicer=(None, None), s_len=None, s_offset=0, file_format='infer') -> Counter:
     """Count single fastA/Q file's reads. Use count_batch for multiple files.
     Slicer should be a tuple of indicies.
     Returns a Counter.
@@ -309,14 +310,14 @@ def count_batch(fn_or_dir, slicer, fn_prefix='', seq_len=None, seq_offset=0, fn_
         for samp, fn_or_dir in file_dict.items():
             cnt = Counter()
             for fn in fn_or_dir:
-                cnt += count_reads(fn, slicer, seq_len, seq_offset)
+                cnt += count_reads_from_file(fn, slicer, seq_len, seq_offset)
             out_files.append(
                 write_count(cnt, samp)
             )
     else:
         LOG.debug(str(file_list))
         for fn in file_list:
-            cnt = count_reads(fn, slicer, seq_len, seq_offset, file_type)
+            cnt = count_reads_from_file(fn, slicer, seq_len, seq_offset, file_type)
             out_files.append(
                 write_count(cnt, fn.split(fn_split)[0].split('/')[-1])
             )
@@ -347,6 +348,41 @@ def get_count_table_from_file_list(file_list:List[Path], splitter='.raw',
         # rawcnt = pd.concat([rawcnt, samp], 1)
     LOG.info(f'sample headers: {list(rawcnt.keys())}')
     return pd.DataFrame(rawcnt).fillna(0).astype(int)
+
+
+def map_allowing_mismatch(query_sequences:typing.Collection[str],
+                          lib_sequences:typing.Collection[str]) -> Dict[str, str]:
+    """Return dictionary of query sequences that uniquely match, with 1 or 0 mismatches,
+    a library sequence. Queries that don't match, or are 1 mismatch from two library
+    sequences are not returned."""
+    # use a Go program to map close seqs quickly
+    # write temp files
+    with open('tmp_unmapped.txt', 'w') as f:
+        f.write('\n'.join(query_sequences))
+
+    with open('tmp_libseqs.txt', 'w') as f:
+        f.write('\n'.join(lib_sequences))
+
+    from pkg_resources import resource_filename
+    fuzzy_prog = resource_filename(__name__, "fuzzyTwoLists")
+
+    output = subprocess.run(
+        [fuzzy_prog,
+         'tmp_unmapped.txt', 'tmp_libseqs.txt', 'tmp.out', '1', '4'],
+        capture_output=True
+    )
+
+    LOG.info(output.stdout.decode())
+
+    # output is in a tab sep list of query->library seq
+    # only containing positive hits
+    now_mapped = {}
+    with open('tmp.out') as f:
+        for line in f:
+            line = line.strip()
+            a, b = line.split('\t')
+            now_mapped[a] = b
+    return now_mapped
 
 
 def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
@@ -399,7 +435,7 @@ def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
 
     # else the library should already be in a useable form.
 
-    # write a single table
+    # get a single table
     file_list = get_file_list(fn_or_dir)
     rawcnt = get_count_table_from_file_list(file_list, splitter, remove_prefix)
 
@@ -409,32 +445,8 @@ def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
     if allow_mismatch:
         # get unmapped sequences
         m =rawcnt.index.isin(lib[seqhdr])
-        unmapped = rawcnt.loc[~m].index
-
-        # use a Go program to map close seqs quickly
-        # write temp files
-        with open('tmp_unmapped.txt', 'w') as f:
-            f.write('\n'.join(unmapped))
-
-        with open('tmp_libseqs.txt', 'w') as f:
-            f.write('\n'.join(lib[seqhdr]))
-
-        output = subprocess.run(
-            ['/Users/johnc.thomas/Dropbox/golang/src/fuzzymatcher/fuzzyTwoLists',
-             'tmp_unmapped.txt', 'tmp_libseqs.txt', 'tmp.out', '1', '4'],
-            capture_output=True
-        )
-
-        LOG.info(output.stdout.decode())
-
-        # output is in a tab sep list of query->library seq
-        # only containing positive hits
-        now_mapped = {}
-        with open('tmp.out') as f:
-            for line in f:
-                line = line.strip()
-                a, b = line.split('\t')
-                now_mapped[a] = b
+        unmapped_seqs = rawcnt.loc[~m].index
+        now_mapped = map_allowing_mismatch(unmapped_seqs, lib[seqhdr])
 
         # sum up the abundance of the newly mapped reads
         raw_now_mapped = rawcnt.loc[now_mapped.keys()]
@@ -447,7 +459,6 @@ def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
 
         # add the gained counts, reindexing to deal with duplicate seqs in cnt
         cnt += gained_counts.reindex(cnt.index, fill_value=0)
-    ## **End of dealing with allow_mismatches**
 
     # Use the guide names as the index as the *should* always be unique,
     #   even if the sgRNA are not
@@ -505,8 +516,9 @@ if __name__ == '__main__':
     parser.add_argument('--allow-mismatch', action='store_true', default=False,
                         help='Allow one mismatch when mapping reads to library.')
     parser.add_argument('--file_type', metavar='FILE_TYPE', choices={'a', 'q', 'infer'}, default='infer',
-                        help='If your files end in something weird, use "a" for fastA or "q" for fastQ. Cant handle mixed file types.'
-                        'Can handle .gz. By default its infered by the file names.')
+                        help='If your files end in something weird, use "a" for fastA or "q" for fastQ. '
+                             'Cant handle mixed file types.'
+                            'Can handle .gz. By default its infered by the file names.')
     parser.add_argument('--no-log-file', action='store_true', help='Prevent a log file from being written')
     parser.add_argument('--debug', action='store_true',
                         help='Print/log additional debug messages.')
