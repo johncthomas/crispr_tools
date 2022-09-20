@@ -82,8 +82,9 @@ def read_fastq(file_obj):
         pos += 1
 
 
-def read_fasta(file_obj):
-
+def read_fasta(file_obj, description_character='>'):
+    """Read FastA file, sequence defined as lines following record description lines
+    that begin with '>' by default. """
     while True:
         # not sure why I have to explicitly deal with StopIter here and not in read_fastq
         #   maybe .__next__() works better?
@@ -93,7 +94,7 @@ def read_fasta(file_obj):
         except StopIteration:
             return
         seq = []
-        while line[0] != '>':
+        while line[0] != description_character:
             seq.append(line.strip())
             try:
                 line = next(file_obj)
@@ -227,7 +228,9 @@ def count_batch(fn_or_dir, slicer, fn_prefix='', seq_len=None, seq_offset=0, fn_
 
 
     """
-
+    kwargs = locals()
+    del kwargs['fn_or_dir']
+    LOG.info(f"Kwargs:\n\t{kwargs}")
     if quiet:
         stream_handler.setLevel(logging.WARNING)
     elif debug:
@@ -351,7 +354,8 @@ def get_count_table_from_file_list(file_list:List[Path], splitter='.raw',
 
 
 def map_allowing_mismatch(query_sequences:typing.Collection[str],
-                          lib_sequences:typing.Collection[str]) -> Dict[str, str]:
+                          lib_sequences:typing.Collection[str],
+                          processors=4) -> Dict[str, str]:
     """Return dictionary of query sequences that uniquely match, with 1 or 0 mismatches,
     a library sequence. Queries that don't match, or are 1 mismatch from two library
     sequences are not returned."""
@@ -368,7 +372,7 @@ def map_allowing_mismatch(query_sequences:typing.Collection[str],
 
     output = subprocess.run(
         [fuzzy_prog,
-         'tmp_unmapped.txt', 'tmp_libseqs.txt', 'tmp.out', '1', '4'],
+         'tmp_unmapped.txt', 'tmp_libseqs.txt', 'tmp.out', '1', f'{processors}'],
         capture_output=True
     )
 
@@ -388,7 +392,8 @@ def map_allowing_mismatch(query_sequences:typing.Collection[str],
 def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
                seqhdr='seq', guidehdr='guide', genehdr='gene',
                report=False, splitter='.raw',
-               remove_prefix=True, out_fn=None, allow_mismatch=False) -> pd.DataFrame:
+               remove_prefix=True, out_fn=None,
+               allow_mismatch=False, processors=4) -> pd.DataFrame:
     """
     Map guide sequences in a set of files containing guide sequences and abundance
     using a library file.
@@ -410,6 +415,7 @@ def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
         remove_prefix: If True, <sample_name>.split('.')[1]
         out_fn: Write DF to filename, if provided
         allow_mismatch: Allow one mismatch when mapping
+        processors: number of proc used when allow_mismatch is True
 
     Returns:
         pd.DataFrame
@@ -446,7 +452,7 @@ def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
         # get unmapped sequences
         m =rawcnt.index.isin(lib[seqhdr])
         unmapped_seqs = rawcnt.loc[~m].index
-        now_mapped = map_allowing_mismatch(unmapped_seqs, lib[seqhdr])
+        now_mapped = map_allowing_mismatch(unmapped_seqs, lib[seqhdr], processors)
 
         # sum up the abundance of the newly mapped reads
         raw_now_mapped = rawcnt.loc[now_mapped.keys()]
@@ -466,11 +472,15 @@ def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
 
     if report:
         prop = cnt.sum().sum()/rawcnt.sum().sum()
+        per_samp_prop = (cnt.sum()/rawcnt.sum()*100).apply(lambda n: f"{n:.3}%")
         LOG.info("{:.3}% of reads map.".format(prop*100))
         no_hits = (cnt == 0).all(1).sum()
         LOG.info("{:.3}% ({}) of library guides not found.".format(
             no_hits/cnt.shape[0]*100, no_hits
         ))
+        LOG.info(
+            f"Per replicate mapping (%):\n{per_samp_prop}"
+        )
 
     # Add gene column, guide
     cnt.insert(0, 'gene', lib.set_index(guidehdr)[genehdr])
@@ -488,9 +498,6 @@ def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
 
 if __name__ == '__main__':
     print('count_reads.py version', __version__)
-    cpus = multiprocessing.cpu_count()
-    if cpus > 10:
-        cpus = 10
 
     #print('v', __version__)
     parser = argparse.ArgumentParser(description='Count unique sequences in FASTQs. Assumes filenames are {sample_name}_L00?_R1_001.fastq[.gz]')
