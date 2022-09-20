@@ -376,13 +376,16 @@ def write_plotly_html(results_table:pd.DataFrame,
             fig.show()
 
 
-def plot_rank_vs_score(score:pd.Series, sig:pd.Series, n_labels, sig_threshold=0.05, step=0.015):
+def _plot_rank_vs_score(score:pd.Series, label_genes:pd.Series=None, sig:pd.Series=None,
+                       max_labels:int=50, sig_threshold=0.05, step=0.015):
     """Score is the thing they will be ranked on,
-    sig series is just used for drawing the significance line
-    todo: make sig optional."""
+    sig series is just used for drawing the significance line"""
+    # this is messed up, do it properly with proper functional technique - e.g. a function
+    # which just spreads out the labels propery
 
     def get_rank_of_thresholds(score, sig, threshold=0.05):
-
+        """Rank of the first value that drops below the threshold,
+        used for drawing a threshold line"""
         # first dropouts, then enrichments
         threshold_yvalue = []
         for endmask in (score < 0), (score > 0):
@@ -399,21 +402,27 @@ def plot_rank_vs_score(score:pd.Series, sig:pd.Series, n_labels, sig_threshold=0
     #tab = res_drugz[k]
     normz_rank = score.rank()
     plt.scatter(normz_rank, score)
-    low, hi = get_rank_of_thresholds(score, sig, sig_threshold)
-    for thresh in (low, hi):
-        plt.plot([0, score.shape[0]], [thresh, thresh], 'k--', alpha=0.6)
-        plt.text(score.shape[0] / 2, thresh + 0.1, f'{sig_threshold * 100}% FDR')
+    if sig is not None:
+        low, hi = get_rank_of_thresholds(score, sig, sig_threshold)
+        for thresh in (low, hi):
+            plt.plot([0, score.shape[0]], [thresh, thresh], 'k--', alpha=0.6)
+            plt.text(score.shape[0] / 2, thresh + 0.1, f'{sig_threshold * 100}% FDR')
 
     for isneg, endmask in (True, (score < 0)), (False, (score > 0)):
         ax = plt.gca()
         axis_to_data = (ax.transAxes + ax.transData.inverted()).transform
         scoreend = score.loc[endmask]
+        if sig is not None:
+            if max_labels is None:
+                max_labels = int(1e10)
+            top_genes = scoreend.loc[(sig.loc[endmask] < sig_threshold)].abs().sort_values(ascending=False).head(max_labels).index
+        else:
+            top_genes = []
 
-        top_genes = scoreend.loc[(sig.loc[endmask] < sig_threshold)].abs().sort_values(ascending=False).head(n_labels).index
-        try:
-            extreme_value = scoreend.loc[top_genes[0]]
-        except IndexError:
-            continue
+        if label_genes is not None:
+            top_genes = list(top_genes) + list(label_genes)
+            top_genes = sorted(top_genes, key=lambda g: score[g])
+
 
         for gi, gn in enumerate(top_genes):
             x = normz_rank[gn]
@@ -447,10 +456,10 @@ def pca_grid(pca, hue_deet, style_deet, max_components=5, also_return_fig=False)
         also_return_fig: When false only axes are returned, set to true to also return the Figures"""
 
 
+    # dummy plot to get legend object
     thing = sns.scatterplot(x=pca.components_[0], y=pca.components_[0],
                             hue=hue_deet, style=style_deet,
                             s=150)
-
     leg = thing.get_legend_handles_labels()
     plt.close()
 
