@@ -123,7 +123,7 @@ def calculate_fold_change(reads, normalized_counts, control_samples, treatment_s
     fc_replicate_id = 'fc_{replicate}'.format(replicate=replicate)
     fc_zscore_id = 'zscore_' + fc_replicate_id
     empirical_bayes_id = 'eb_std_{replicate}'.format(replicate=replicate)
-    one_based_idx = replicate + 1
+
 
     # Get the control and treatment sample ids for each replicate
     control_sample = control_samples[replicate]
@@ -223,7 +223,7 @@ def calculate_drugz_score(fold_change, min_observations, columns):
     # Set the header for the two columns
     per_gene_scores.columns = ['sumZ', 'numObs']
 
-	# Get a dataframe of values for genes where the number of observations is greater than the minimum threshold
+    # Get a dataframe of values for genes where the number of observations is greater than the minimum threshold
     per_gene_results = per_gene_scores.loc[per_gene_scores.numObs >= min_observations, :]
 
     # Update the row number (number of genes) for this new dataframe.
