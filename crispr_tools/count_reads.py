@@ -1,7 +1,5 @@
 #!/usr/bin/env python
 import os, sys, subprocess
-import typing
-
 import pandas as pd
 from collections import Counter
 import gzip
@@ -27,14 +25,14 @@ LOG.addHandler(stream_handler)
 """Functions for counting and mapping reads from multiple FASTQ files
 to some kind of sequence library, e.g. a CRISPR guide library. 
 Merging counts assumes that FQ filenames are in the format 
-{sample_name}_L00?_R1_001.fastq[.gz]
+{sample_name}_L???_R1_001.fastq[.gz]
 and that the sequence to be mapped is in the same position in every read
 (including the entire read being the sequence).
+
 Produces dereplicated sequence counts (one file per sample) and then a single
 file containing reads mapped to guide/gene from a library file."""
 
-__version__ = '1.8.1'
-# 1.8.1 bugfix in merge samples. Won't work with runs that have more than 9 lanes
+__version__ = '1.8.0'
 # 1.8.0 added back fuzzy matching, more efficiently this time
 # 1.7.0 adding permenant logging
 # 1.6.0 removed fuzzy counting
@@ -62,6 +60,7 @@ __version__ = '1.8.1'
 #todo more information about matches per file, per sample mapping stats
 #todo unmerged counts with identical filenames overwrite each other currently in the
 #todo check library seq len and file seq len match.
+#todo order reps by
 
 
 FILE_FMT = {'a':['.fna', '.fasta', '.fna.gz', '.fasta.gz'],
@@ -82,9 +81,8 @@ def read_fastq(file_obj):
         pos += 1
 
 
-def read_fasta(file_obj, description_character='>'):
-    """Read FastA file, sequence defined as lines following record description lines
-    that begin with '>' by default. """
+def read_fasta(file_obj):
+
     while True:
         # not sure why I have to explicitly deal with StopIter here and not in read_fastq
         #   maybe .__next__() works better?
@@ -94,7 +92,7 @@ def read_fasta(file_obj, description_character='>'):
         except StopIteration:
             return
         seq = []
-        while line[0] != description_character:
+        while line[0] != '>':
             seq.append(line.strip())
             try:
                 line = next(file_obj)
@@ -105,7 +103,7 @@ def read_fasta(file_obj, description_character='>'):
             yield s
 
 
-def count_reads_from_file(fn, slicer=(None, None), s_len=None, s_offset=0, file_format='infer') -> Counter:
+def count_reads(fn, slicer=(None, None), s_len=None, s_offset=0, file_format='infer') -> Counter:
     """Count single fastA/Q file's reads. Use count_batch for multiple files.
     Slicer should be a tuple of indicies.
     Returns a Counter.
@@ -228,9 +226,7 @@ def count_batch(fn_or_dir, slicer, fn_prefix='', seq_len=None, seq_offset=0, fn_
 
 
     """
-    kwargs = locals()
-    del kwargs['fn_or_dir']
-    LOG.info(f"Kwargs:\n\t{kwargs}")
+
     if quiet:
         stream_handler.setLevel(logging.WARNING)
     elif debug:
@@ -271,7 +267,7 @@ def count_batch(fn_or_dir, slicer, fn_prefix='', seq_len=None, seq_offset=0, fn_
     if merge_samples:
         samples = set([f.split('_L001_')[0].split('/')[-1] for f in file_list if '_L001_' in f])
 
-        file_dict = {s:[f for f in file_list if s+'_L00' in f] for s in samples}
+        file_dict = {s:[f for f in file_list if s in f] for s in samples}
         message_samples = ['Samples found:']
         for k,v in file_dict.items():
             message_samples.append(k)
@@ -313,14 +309,14 @@ def count_batch(fn_or_dir, slicer, fn_prefix='', seq_len=None, seq_offset=0, fn_
         for samp, fn_or_dir in file_dict.items():
             cnt = Counter()
             for fn in fn_or_dir:
-                cnt += count_reads_from_file(fn, slicer, seq_len, seq_offset)
+                cnt += count_reads(fn, slicer, seq_len, seq_offset)
             out_files.append(
                 write_count(cnt, samp)
             )
     else:
         LOG.debug(str(file_list))
         for fn in file_list:
-            cnt = count_reads_from_file(fn, slicer, seq_len, seq_offset, file_type)
+            cnt = count_reads(fn, slicer, seq_len, seq_offset, file_type)
             out_files.append(
                 write_count(cnt, fn.split(fn_split)[0].split('/')[-1])
             )
@@ -353,47 +349,10 @@ def get_count_table_from_file_list(file_list:List[Path], splitter='.raw',
     return pd.DataFrame(rawcnt).fillna(0).astype(int)
 
 
-def map_allowing_mismatch(query_sequences:typing.Collection[str],
-                          lib_sequences:typing.Collection[str],
-                          processors=4) -> Dict[str, str]:
-    """Return dictionary of query sequences that uniquely match, with 1 or 0 mismatches,
-    a library sequence. Queries that don't match, or are 1 mismatch from two library
-    sequences are not returned."""
-    # use a Go program to map close seqs quickly
-    # write temp files
-    with open('tmp_unmapped.txt', 'w') as f:
-        f.write('\n'.join(query_sequences))
-
-    with open('tmp_libseqs.txt', 'w') as f:
-        f.write('\n'.join(lib_sequences))
-
-    from pkg_resources import resource_filename
-    fuzzy_prog = resource_filename(__name__, "fuzzyTwoLists")
-
-    output = subprocess.run(
-        [fuzzy_prog,
-         'tmp_unmapped.txt', 'tmp_libseqs.txt', 'tmp.out', '1', f'{processors}'],
-        capture_output=True
-    )
-
-    LOG.info(output.stdout.decode())
-
-    # output is in a tab sep list of query->library seq
-    # only containing positive hits
-    now_mapped = {}
-    with open('tmp.out') as f:
-        for line in f:
-            line = line.strip()
-            a, b = line.split('\t')
-            now_mapped[a] = b
-    return now_mapped
-
-
 def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
                seqhdr='seq', guidehdr='guide', genehdr='gene',
                report=False, splitter='.raw',
-               remove_prefix=True, out_fn=None,
-               allow_mismatch=False, processors=4) -> pd.DataFrame:
+               remove_prefix=True, out_fn=None, allow_mismatch=False) -> pd.DataFrame:
     """
     Map guide sequences in a set of files containing guide sequences and abundance
     using a library file.
@@ -415,7 +374,6 @@ def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
         remove_prefix: If True, <sample_name>.split('.')[1]
         out_fn: Write DF to filename, if provided
         allow_mismatch: Allow one mismatch when mapping
-        processors: number of proc used when allow_mismatch is True
 
     Returns:
         pd.DataFrame
@@ -441,7 +399,7 @@ def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
 
     # else the library should already be in a useable form.
 
-    # get a single table
+    # write a single table
     file_list = get_file_list(fn_or_dir)
     rawcnt = get_count_table_from_file_list(file_list, splitter, remove_prefix)
 
@@ -451,8 +409,32 @@ def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
     if allow_mismatch:
         # get unmapped sequences
         m =rawcnt.index.isin(lib[seqhdr])
-        unmapped_seqs = rawcnt.loc[~m].index
-        now_mapped = map_allowing_mismatch(unmapped_seqs, lib[seqhdr], processors)
+        unmapped = rawcnt.loc[~m].index
+
+        # use a Go program to map close seqs quickly
+        # write temp files
+        with open('tmp_unmapped.txt', 'w') as f:
+            f.write('\n'.join(unmapped))
+
+        with open('tmp_libseqs.txt', 'w') as f:
+            f.write('\n'.join(lib[seqhdr]))
+
+        output = subprocess.run(
+            ['/Users/johnc.thomas/Dropbox/golang/src/fuzzymatcher/fuzzyTwoLists',
+             'tmp_unmapped.txt', 'tmp_libseqs.txt', 'tmp.out', '1', '4'],
+            capture_output=True
+        )
+
+        LOG.info(output.stdout.decode())
+
+        # output is in a tab sep list of query->library seq
+        # only containing positive hits
+        now_mapped = {}
+        with open('tmp.out') as f:
+            for line in f:
+                line = line.strip()
+                a, b = line.split('\t')
+                now_mapped[a] = b
 
         # sum up the abundance of the newly mapped reads
         raw_now_mapped = rawcnt.loc[now_mapped.keys()]
@@ -465,6 +447,7 @@ def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
 
         # add the gained counts, reindexing to deal with duplicate seqs in cnt
         cnt += gained_counts.reindex(cnt.index, fill_value=0)
+    ## **End of dealing with allow_mismatches**
 
     # Use the guide names as the index as the *should* always be unique,
     #   even if the sgRNA are not
@@ -472,15 +455,11 @@ def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
 
     if report:
         prop = cnt.sum().sum()/rawcnt.sum().sum()
-        per_samp_prop = (cnt.sum()/rawcnt.sum()*100).apply(lambda n: f"{n:.3}%")
         LOG.info("{:.3}% of reads map.".format(prop*100))
         no_hits = (cnt == 0).all(1).sum()
         LOG.info("{:.3}% ({}) of library guides not found.".format(
             no_hits/cnt.shape[0]*100, no_hits
         ))
-        LOG.info(
-            f"Per replicate mapping (%):\n{per_samp_prop}"
-        )
 
     # Add gene column, guide
     cnt.insert(0, 'gene', lib.set_index(guidehdr)[genehdr])
@@ -498,18 +477,22 @@ def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
 
 if __name__ == '__main__':
     print('count_reads.py version', __version__)
+    cpus = multiprocessing.cpu_count()
+    if cpus > 10:
+        cpus = 10
 
     #print('v', __version__)
     parser = argparse.ArgumentParser(description='Count unique sequences in FASTQs. Assumes filenames are {sample_name}_L00?_R1_001.fastq[.gz]')
     parser.add_argument('files', nargs='+',
                         help="A list of files or dir. All files in given dir that end with valid suffixes (inc. gzips) will be counted.")
 
-    parser.add_argument('-s', '--slice', metavar='M,N',required=True,
-                        help='Slice indicies to truncate sequences (zero indexed, not end-inclusive). Comma-sep numbers. Required.',)
-    parser.add_argument('-p', '--prefix', metavar='FN_PREFIX', required=True,
-                        help="Prefix added to output files, can include absolute or relative paths.")
+    parser.add_argument('-s', metavar='M,N',
+                        help='Slice indicies to truncate sequences (zero indexed, not end-inclusive). Comma-sep numbers. Required.',
+                        required=True)
     parser.add_argument('--suffix', default='.rawcount', metavar='FN_SUFFIX',
                         help="Suffix added to output files, .txt will always be added after. Default `.rawcount`")
+    parser.add_argument('-p',  metavar='FN_PREFIX',
+                        help="Prefix added to output files, can include absolute or relative paths.")
     parser.add_argument('--fn-split', default='_R1_', metavar='STR',
                         help="String used to split filenames and form output file prefix. Default `_R1_`." \
                              "Doesn't do anything if --merge-samples is used.")
@@ -523,9 +506,8 @@ if __name__ == '__main__':
     parser.add_argument('--allow-mismatch', action='store_true', default=False,
                         help='Allow one mismatch when mapping reads to library.')
     parser.add_argument('--file_type', metavar='FILE_TYPE', choices={'a', 'q', 'infer'}, default='infer',
-                        help='If your files end in something weird, use "a" for fastA or "q" for fastQ. '
-                             'Cant handle mixed file types.'
-                            'Can handle .gz. By default its infered by the file names.')
+                        help='If your files end in something weird, use "a" for fastA or "q" for fastQ. Cant handle mixed file types.'
+                        'Can handle .gz. By default its infered by the file names.')
     parser.add_argument('--no-log-file', action='store_true', help='Prevent a log file from being written')
     parser.add_argument('--debug', action='store_true',
                         help='Print/log additional debug messages.')
@@ -539,11 +521,11 @@ if __name__ == '__main__':
     assert all([os.path.isfile(f) for f in clargs.files])
 
     # slices list of input files, or dir
-    slicer = [int(n) for n in clargs.slice.split(',')]
+    slicer = [int(n) for n in clargs.s.split(',')]
 
     written_fn = count_batch(fn_or_dir=clargs.files,
                              slicer=slicer,
-                             fn_prefix=clargs.prefix,
+                             fn_prefix=clargs.p,
                              fn_suffix=clargs.suffix,
                              fn_split=clargs.fn_split,
                              merge_samples=clargs.merge_samples,
@@ -554,6 +536,6 @@ if __name__ == '__main__':
 
     if clargs.library:
         map_counts(written_fn, clargs.library, report=True, remove_prefix=True,
-                out_fn=clargs.prefix+'.counts.tsv', splitter=clargs.suffix,
+                out_fn=clargs.p+'.counts.tsv', splitter=clargs.suffix,
                 allow_mismatch=clargs.allow_mismatch)
 
