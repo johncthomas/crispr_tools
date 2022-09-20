@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import json
-import logging, os, pathlib, datetime, inspect, argparse, sys
+import logging, os, datetime, inspect, argparse
 
 from typing import List, Dict
 from copy import copy
@@ -11,17 +11,15 @@ from itertools import combinations
 
 from attrdict import AttrDict
 
-import yaml
-import numpy as np
 import pandas as pd
 #import matplotlib.pyplot as plt
+from crispr_tools import dataset
 
-from crispr_tools import qc, tools, jacks_tools, version
-import pprint
-
+ARROW = '→'
 # todo don't write drugz tables until everything is run
 # have default prefix
 # outdir + prefix issue if both not local (tests should include weird combinations)
+# Validation should include sample names with dots and dashes!
 
 
 try:
@@ -45,10 +43,9 @@ class PipelineOptionsError(Exception):
     """Errors in the configuration file that would prevent the pipeline from running"""
     pass
 
+logging.basicConfig() # required for setLevel to work if you don't set a specific handler
 pipeLOG = logging.getLogger('pipeline')
 pipeLOG.setLevel(logging.INFO)
-#logging.getLogger('matplotlib').setLevel(logging.WARNING)
-
 
 #from crispr_tools.count_reads import count_reads, count_batch, map_counts
 #from crispr_tools.tools import plot_read_violins, plot_ROC, plot_volcano, tabulate_mageck, tabulate_drugz
@@ -93,174 +90,42 @@ def clargs_to_dict(argstring) -> Dict[str, str]:
 
 
 
-class AnalysisWorkbook:
-    """Parse the excel sheet describing how an experiment should be analysed.
-    Generates the dict for JSON or calling .run_analyses
+def get_treatment_str(samp_deets, treat, ctrl):
 
-    Default method kwargs:
-        mageck: --remove-zero both --remove-zero-threshold 2*pseudocount
+    def is_nt(s):
+        return pd.isna(s) or (s == 'None') or (s == 'DMSO') or (s=='')
 
-    additional_options overwrites anything in the excel file"""
+    t_deets, c_deets = samp_deets.loc[treat], samp_deets.loc[ctrl]
 
-    def __init__(self, xlfn, parse_workbook=True, **additional_options):
-        #self.xpk = 'Experiment details'
-        self.fn = xlfn
-        self.wb = self.load_analysis_workbook(xlfn)
-        if parse_workbook:
-            self.expd = self.workbook_to_dict(**additional_options)
+    # get chem treat str
+    if not is_nt(t_deets.Treatment):
+        if is_nt(c_deets.Treatment):
+            chem_str = t_deets.Treatment
+        else:
+            chem_str = f"{c_deets.Treatment}{ARROW}{t_deets.Treatment}"
+    # the chem_str is only blank when there was non-genetic perturbation
+    else:
+        chem_str = ''
 
+    if not t_deets.KO:
+        ko_str = ''
+    else:
+        if not c_deets.KO:
+            ko_str = t_deets.KO+'-KO'
+        else:
+            ko_str = f"{c_deets.KO}-KO{ARROW}{t_deets.KO}-KO"
 
-    # could be useful
-    # def varefy_wb_integrity(self):
-    #     assert not self.wb['Sample details'].index.duplicated().any()
-
-    def load_analysis_workbook(self, fn):
-        # nothing needs to be numeric
-        wb = pd.read_excel(fn, sheet_name=None, dtype=object, )
-        wb = {k:tab.fillna('') for k,tab in wb.items()}
-
-        wb['Sample details'] = wb['Sample details'].set_index('Replicate')
-
-        wb['Experiment details'] = pd.read_excel(
-            fn, sheet_name='Experiment details',
-            header=None, index_col=0,
-        )[1].fillna('')
-
-        #wb['Sample details'] = wb['Sample details'].set_index('Replicate')
-
-        return wb
-
-    def workbook_to_dict(self,  **additional_options):
-
-        pipeLOG.info(f'Parsing xlsx: {self.fn}')
-
-        counts_prefix = ''
-        if 'counts_file' in additional_options:
-            counts_file = additional_options['counts_file']
-
-            # if this is a path, that should be prepended to path specified
-            #  in analyses sheet
-            if os.path.isdir(counts_file):
-                pipeLOG.info(f'Counts file location: {counts_file}')
-                counts_prefix = counts_file
-
-            # if it's not a file we want rid of it
-            # if it is, it will be added from additional_options at the end
-            if not os.path.isfile(counts_file):
-                del additional_options['counts_file']
-
-            if counts_file and (not os.path.exists(counts_file)):
-                pipeLOG.warning(f"Counts path: {counts_file} is not a file or directory.")
-
-        # Remove pesky unintended whitespace.
-        safesplit = lambda x: x.replace(' ', '').split(',')
-
-        repdeets = self.wb['Sample details']
-        ctrlgrps = self.wb['Control groups']
-
-        # all "Experiment details" k:v are top level and don't need processing
-        experiment_dictionary = {}
-
-        # Some expd options will be in the workbook, store them with the appropriate
-        #  internal key
-        deets = self.wb['Experiment details'].to_dict()
-        for wbk, jsonk in {'Experiment name': 'experiment_id',
-                       'Analysis version': 'analysis_version',
-                       'Notes': 'notes',
-                       'File prefix': 'file_prefix'}.items():
-            try:
-                experiment_dictionary[jsonk] = deets[wbk]
-            except KeyError:
-                # Most won't exist and any other errors
-                #   will get picked up later
-                pass
-
-        # control groups. produces:
-        # {grpA:{ctrl_samp:[test_samp1, test_samp2, ...], ...}, ...}
-        ctrl_dict = {}
-        for grpn in ctrlgrps.Group.unique():
-            cgrp = ctrlgrps[ctrlgrps.Group == grpn]
-            # groupby gives the indexes, we want the Test sample values
-            # gotta list() the reps cus json.dump can't handle an ndarray
-            g = {c:list(cgrp.loc[i, 'Test sample'].values)
-                 for c, i in cgrp.groupby('Control sample').groups.items()}
-            ctrl_dict[grpn] = g
-        experiment_dictionary['control_groups'] = ctrl_dict
-
-        # sample_reps, just {sampA:[repA1, repA2], ...}
-        experiment_dictionary['sample_reps'] = {
-            k:list(v.values) for k, v in repdeets.groupby('Sample').groups.items()
-        }
-
-        # Analyses. Producing a list of dicts with "method" and "groups":List
-        #   required keys. Should practically always be a fn_counts, but ignore
-        #   if blank. kwargs & pseudocount added if not present
-        analyses = []
-        pipeLOG.info('workbook_to_dict: Processing analyses')
-        for _, row in self.wb['Analyses'].iterrows():
-            pipeLOG.debug(str(row))
-            for method in safesplit(row['Method']):
-                andict = {'method':method,
-                          'groups':safesplit(row['Control group'])}
-
-                if 'kwargs' not in andict:
-                    andict['kwargs'] = {}
-
-
-                if row['Add pseudocount']:
-                    psdc = int(row['Add pseudocount'])
-                else:
-                    psdc = 1
-                andict['pseudocount'] = psdc
-
-
-                if row['Counts file']:
-                    andict['counts_file'] = os.path.join(
-                        counts_prefix,
-                        row['Counts file']
-                    )
-
-                # add default args if any
-                if not row['Arguments']:
-                    if method == 'mageck':
-                        pc = andict['pseudocount']
-                        if pc > 1:
-                            cutoff = 2*pc
-                        else:
-                            cutoff = 0
-                        andict['kwargs'] = {'remove-zero':'both',
-                                            'remove-zero-threshold':cutoff}
-                else:
-                    rowargs = row['Arguments']
-                    try:
-
-                        kwargs = eval(rowargs)
-                        if not type(kwargs) is  dict:
-                            raise RuntimeError()
-                    except:
-                        pipeLOG.info(f"Parsing analysis Arguments, {rowargs}, as command line style")
-                        # try parsing as command line options
-                        kwargs = clargs_to_dict(rowargs)
-                    andict['kwargs'] = kwargs
-                    pipeLOG.info(f"Arguments: {rowargs} parsed to {kwargs}")
-
-                # deal with paired, which is handled different in the programs
-                if row['Paired'] and (method == 'mageck'):
-                    andict['kwargs']['paired'] = ''
-                elif not row['Paired'] and (method == 'drugz'):
-                    andict['kwargs']['unpaired'] = True
-
-                analyses.append(andict)
-        experiment_dictionary['analyses'] = analyses
-
-        for k, v in additional_options.items():
-            experiment_dictionary[k] = v
-
-        if 'file_prefix' not in experiment_dictionary:
-            experiment_dictionary['file_prefix'] = experiment_dictionary['experiment_id']
-
-        return experiment_dictionary
-
+    if chem_str and not ko_str:
+        treatment_str = chem_str
+    elif ko_str and not chem_str:
+        treatment_str = ko_str
+    else:
+        if t_deets.Treatment == c_deets.Treatment:
+            # it's a KO in a chemical background
+            treatment_str = f"{ko_str} (with {chem_str})"
+        else:
+            treatment_str = f"{chem_str} (in {ko_str} cells)"
+    return treatment_str
 
 
 class StreamToLogger(object):
@@ -291,11 +156,11 @@ def call_jacks(sample_reps:Dict[str,List[str]], ctrlmap, count_fn, prefix, kwarg
     runJACKS(*jacks_args, outprefix=prefix, **kwargs)
 
 
-def set_logger(log_fn):
+def set_logger(log_fn, level=logging.INFO):
 
     hndlr = logging.FileHandler(log_fn, 'w')
-    # hndlr.setLevel(logging.INFO)
-    pipeLOG.setLevel(logging.INFO)
+    hndlr.setLevel(level)
+
     pipeLOG.addHandler(hndlr)
     try:
         jacksLOG.addHandler(hndlr)
@@ -339,11 +204,12 @@ def call_drugZ_batch(sample_reps:Dict[str, list],
     use drop_guide_* args remove guides that appear below given abundance.
     Valid drop_guide_type is 'any', 'all'. These can also be set via kwargs."""
 
-    try:
-        drop_guide_less_than = int(kwargs['drop_guide_less_than'])
-        drop_guide_type = kwargs['drop_guide_type']
-    except KeyError:
-        pass
+    if kwargs:
+        try:
+            drop_guide_less_than = int(kwargs['drop_guide_less_than'])
+            drop_guide_type = kwargs['drop_guide_type']
+        except KeyError:
+            pass
 
     if drop_guide_less_than:
         assert drop_guide_type in ('any', 'all', 'both')
@@ -503,10 +369,14 @@ def call_mageck_batch(sample_reps:Dict[str, list],
 
 # When adding new functions, need to deal with pseudocount option in the main func
 #   and pairedness in the AnalysisWorkbook
-analysis_functions = {'mageck':call_mageck_batch, 'drugz':call_drugZ_batch}
-analysis_tabulate = {'mageck':tabulate_mageck, 'drugz':tabulate_drugz}
-available_analyses = analysis_functions.keys()
+def dry_function(*args, **kwargs):
+    pass
 
+analysis_functions = {'mageck':call_mageck_batch, 'drugz':call_drugZ_batch, }
+analysis_tabulate = {'mageck':tabulate_mageck, 'drugz':tabulate_drugz, }
+available_analyses = analysis_functions.keys()
+analysis_functions['dry'] = dry_function
+analysis_tabulate['dry'] = dry_function
 
 # def iter_comps(comparisons: List[dict], tab: pd.DataFrame=None):
 #     for comparison in comparisons:
@@ -574,6 +444,9 @@ def validate_required_arguments(arguments:dict):
     required_options = ['sample_reps', 'experiment_id', 'analysis_version',
                          'analyses', 'file_prefix',]
 
+    analyses = arguments['analyses']
+    control_groups = arguments['control_groups']
+
     option_is_missing = lambda op: (op not in arguments.keys()) or (not arguments[op])
     missing_options = [op for op in required_options if option_is_missing(op)]
     if missing_options:
@@ -584,7 +457,7 @@ def validate_required_arguments(arguments:dict):
     # check the required analyses options present
     required_analysis_opts = ['method']
     for k in required_analysis_opts:
-        for ans in arguments['analyses']:
+        for ans in analyses:
             if k not in ans:
                 raise RuntimeError(
                     f'Required analysis {k} option missing from analysis {ans}.'
@@ -593,20 +466,23 @@ def validate_required_arguments(arguments:dict):
     # and the analyses dics themselves are formatted correctly.
     analysis_opts_types = {'method':str, 'kwargs':dict, 'groups':list, 'counts_file':str,
                            'label':str}
-    for analysis_dict in arguments['analyses']:
+    for analysis_dict in analyses:
         for opt, tipe in analysis_opts_types.items():
             try:
                 if type(analysis_dict[opt]) != tipe:
                     raise RuntimeError(
-                        f"Analysis option types not as expected: {arguments['analyses']}"
+                        f"Analysis option types not as expected: {analyses}"
                     )
             # there are optional options, ignore them if they're missing
             except KeyError:
                 pass
 
     samples = arguments['sample_reps'].keys()
+    if any(['-' in s for s in samples]):
+        raise RuntimeError(f'One or more sample names contain "-", which is not allowed.')
+    # Find samples specified in comparisons but not found in sample_reps
     missing_samples = set()
-    for _, ctrl_samps in arguments['control_groups'].items():
+    for _, ctrl_samps in control_groups.items():
         for ctrl, samps in ctrl_samps.items():
             if ctrl not in samples:
                 missing_samples.add(ctrl)
@@ -616,6 +492,19 @@ def validate_required_arguments(arguments:dict):
     missing_samples = list(missing_samples)
     if missing_samples:
         raise RuntimeError(f"Samples named in control_groups missing in sample_reps:\n{', '.join(missing_samples)}")
+
+    missing_groups = set()
+    for ans in analyses:
+        for grp in ans['groups']:
+            if grp not in control_groups.keys():
+                missing_groups.add(grp)
+        if missing_groups:
+            raise RuntimeError(
+                f'Group(s) in Analyses not found in Control Groups: {missing_groups}.\n'
+                f'Control Groups groups {list(control_groups.keys())}'
+            )
+
+
 
 def process_arguments(arguments:dict, delete_unrequired_args=True) -> dict:
     """Deal with special keywords from the experiment dictionary.
@@ -694,13 +583,44 @@ def process_arguments(arguments:dict, delete_unrequired_args=True) -> dict:
                     f"\nCount columns: {', '.join(cnt_reps)}"
                 )
 
-    # Control groups to be included, defaults to all if None
-    if 'run_groups' not in arguments:
-        arguments['run_groups'] = None
-    run_groups = arguments['run_groups']
-    if run_groups is not None:
+    # Remove control groups not specified in run_groups, if run_groups set.
+    if 'run_groups' in arguments and arguments['run_groups'] is not None:
+        run_groups = arguments['run_groups']
         if type(run_groups) is str:
-            arguments['run_groups'] = run_groups.split(',')
+            run_groups = run_groups.split(',')
+        remove_groups = set()
+        for grp in arguments['control_groups']:
+            if grp not in run_groups:
+                remove_groups.add(grp)
+        pipeLOG.info(f'Removing control groups: {", ".join(sorted(remove_groups))}')
+        for grp in remove_groups:
+            del arguments['control_groups'][grp]
+        if len(arguments["control_groups"]) == 0:
+            raise PipelineOptionsError(f'No control groups left with run_groups option: {run_groups}')
+        pipeLOG.info(f'Running pipeline with remaining groups: {",".join(arguments["control_groups"].keys())}')
+    # remove before calling run_analyses
+    if 'run_groups' in arguments:
+        del arguments['run_groups']
+
+    # remove analyses not specified in run_analysis if any set
+    if 'run_analyses' in arguments and arguments['run_analyses'] is not None:
+        analyses_to_run = arguments['run_analyses']
+        if type(analyses_to_run) is str:
+            analyses_to_run = analyses_to_run.split(',')
+        filtered_analyses = []
+        removed_analyses = set()
+        for analysis in arguments['analyses']:
+            if analysis['name'] in analyses_to_run:
+                filtered_analyses.append(analysis)
+            else:
+                removed_analyses.add(analysis['name'])
+        arguments['analyses'] = filtered_analyses
+        pipeLOG.info(f"Removed analyses named: {', '.join(sorted(removed_analyses))}")
+        if len(arguments['analyses']) == 0:
+            raise PipelineOptionsError(f'No analyses left with run_analyses option: {analyses_to_run}')
+    if 'run_analyses' in arguments:
+        del arguments['run_analyses']
+
 
     # These don't need to be passed to the pipeline.
     if delete_unrequired_args:
@@ -716,27 +636,50 @@ def run_analyses(output_dir, file_prefix,
                  sample_reps:Dict[str, list],
                  control_groups:Dict[str, Dict[str, list]],
                  analyses:List[dict],
+                 counts_file=None,
                  methods_kwargs:Dict=None,
-                 dont_log=False, #todo replace dont_log with some kind of verbosity thing
-                 compjoiner='-', #tools.ARROW,
-                 use_group_as_label=False,
+                 dont_log=False,  #todo replace dont_log with some kind of verbosity thing
+                 compjoiner='-',  #tools.ARROW,
                  notes='',
-                 skip_analyses=None,
-                 run_groups:List[str]=None, counts_file=None):
+                 skip_method=None,
+                 dry_run=False,
+                 **kwarghole,
+                 ):
 
-    """Run batches of CRISPR analyses."""
+    """Run batches of CRISPR analyses.
+
+    Args:
+        output_dir: Directory within which all files will be written.
+        file_prefix: Prefix for all written files (should not contain directories)
+        sample_reps: Dictionary defining sample_name to list of replicate names.
+        control_groups: Groups of maps; which samples will be used in comparisons.
+            {ctrl_grp_name: {ctrl_sample: [test_samp1, ...]}}
+        analyses: List of analyses to be performed. Each dict contains all required
+            options.
+        counts_file: counts files specified per analysis take precident, this value
+            used only when one is not specified in an analysis.
+        methods_kwargs: Options to be passed to analysis methods. {analysis_name: {}}
+        dont_log: Set to True to supress writing logs. Will be preplaced by some
+            kind of verbosity setting.
+        compjoiner: In written files, character(s) used to join ctrl_samp & treat_samp.
+    """
+
+    if kwarghole:
+        pipeLOG.warning(f"Unexpected keyword arguments: {kwarghole}")
 
     #pipeLOG.warning(f'Unrecognised arguments passed to run_analyses:\n   {unrecognised_kwargs}')
     pipeLOG.info(f"notes: {notes}")
 
-    if skip_analyses is None:
-        skip_analyses = []
+    if skip_method is None:
+        skip_method = []
 
-    if run_groups is None:
-        group_included = lambda x: True
-    else:
-        group_included = lambda x: x in run_groups
-        pipeLOG.info(f'Running only control groups: {run_groups}')
+    # # this should be handled before calling this function by removing undesired groups
+    # if run_groups is None:
+    #     group_included = lambda x: True
+    # else:
+    #     run_groups = list_not_str(run_groups)
+    #     group_included = lambda x: x in run_groups
+    #     pipeLOG.info(f'Running only control groups: {run_groups}')
 
     # Create the root experiment directory
     p = str(output_dir)
@@ -762,25 +705,27 @@ def run_analyses(output_dir, file_prefix,
             os.mkdir(p)
         except FileExistsError:
             pass
-
+    print(output_dir)
     mkdir(output_dir)
     mkdir(str(Path(output_dir, 'tables')))
     for analysis_method in methods_used:
 
         mkdir(str(Path(output_dir, analysis_method)))
         mkdir(str(Path(output_dir, analysis_method, 'files')))
-        #call(['mkdir', '-p', str(Path(output_dir, analysis_method))])
-        #call(['mkdir', str(Path(output_dir, analysis_method, 'tables'))])
-        #call(['mkdir', str(Path(output_dir, analysis_method, 'files'))])
-
 
     ######################
     ## Run the analyses ##
     ######################
     ran_analyses = set()
+
     for analysis_dict in analyses:
-        analysis_method = analysis_dict['method']
-        if analysis_method in skip_analyses:
+
+        if dry_run:
+            analysis_method = 'dry'
+        else:
+            analysis_method = analysis_dict['method']
+
+        if analysis_method in skip_method:
             pipeLOG.info(f"Skipping analysis method {analysis_method}")
             continue
 
@@ -790,6 +735,8 @@ def run_analyses(output_dir, file_prefix,
         #   arguments that override these.
         try:
             default_method_kwargs = methods_kwargs[analysis_method]
+            if not default_method_kwargs:
+                default_method_kwargs = {}
         except:
             default_method_kwargs = {}
 
@@ -809,15 +756,8 @@ def run_analyses(output_dir, file_prefix,
 
         # go through the selected groups for this analysis and run the thing
         for grp in groups:
-            if not group_included(grp):
-                pipeLOG.info(f"Skipping group {grp}")
-                continue
-            if use_group_as_label:
-                labstr = grp
-            if 'label' in analysis_dict:
-                labstr = '.'+analysis_dict['label']
-            else:
-                labstr = ''
+
+            labstr = ''
 
             ctrl_map = control_groups[grp]
             try:
@@ -846,60 +786,24 @@ def run_analyses(output_dir, file_prefix,
             tab = analysis_tabulate[analysis_method](results_prefix, compjoiner)
             tabfn = str(os.path.join(output_dir, 'tables', f'{table_file_prefix}.{analysis_method}_table.csv'))
             pipeLOG.info(f'writing table: {tabfn}')
-            tab.to_csv(tabfn, encoding='utf-8-sig')
+            if not dry_run:
+                tab.to_csv(tabfn, encoding='utf-8-sig')
 
 
-if __name__ == '__main__':
-
-    pipeLOG.info(str(__version__))
-    parser = argparse.ArgumentParser(
-        description="Run mageck and jacks analyses using a JSON file.\n "
-                    "Use arguments below to override JSON options"
-    )
-
-    parser.add_argument(
-        'config_file', metavar='FILE',
-        help = ("path to .xlsx or .json file specifying arguments. JSON must must contain `sample_reps`"
-                ", `analyses` & `control_groups` keywords and values. If passing an excel, --analysis-version"
-                " must be set. "
-                "Other options may be overridden by command line arguments.")
-        )
-    parser.add_argument('--counts', metavar='FILE/DIR',
-                        help='Path to counts file, or directory containing counts file specified in config_file',
-                        default=None, dest='counts_file')
-    parser.add_argument('--output-dir', metavar='PATH', default='.',
-                        help=('Path to where results directory will be created if not current'
-                              ' directory. Experiment_id and analysis_version will determine results dir.') )
-    parser.add_argument('--file-prefix', default=None,
-                        help="String to form identifying prefix for all files generated.")
-    parser.add_argument('--skip-analyses', metavar='list,of,progs', default=None,
-                        help='Filter analyses to be run.')
-    parser.add_argument('--run-groups', metavar='list,of,groups', default=None,
-                        help='Specify control groups (as defined in exp dict) to be included.')
-    parser.add_argument('--dont-log', action='store_true', dest='dont_log', default=None,
-                        help="Don't write a log file.")
-    parser.add_argument('--analysis-version', default=None,
-                        help='Output files will be stored in a directory of the above name, within the experiment dir.')
-
-    # get arguments from the command line and the YAML
-    clargs = parser.parse_args() # need to assign this before calling vars() for some reason
-    cmd_line_args = vars(clargs)
-
-
-    file_prefix = cmd_line_args['file_prefix']
-    if file_prefix is None:
-         file_prefix = ''
+def load_configuration_file(config_filename, counts_dir='.') -> dict:
+    """
+    Args:
+        config_filename: An .xlsx or .json containing information to
+            run analyses.
+        counts_dir: A directory containing the counts files, if not
+            the current working dir.
+    """
 
     # Load the configuration file
-    config_file = cmd_line_args['config_file']
-    if config_file.endswith('xlsx'):
-        if cmd_line_args['counts_file'] is not None:
-            cntfn = cmd_line_args['counts_file']
-            del cmd_line_args['counts_file']
-            config_file_args = AnalysisWorkbook(config_file,  counts_file = cntfn).expd
-        else:
-            config_file_args = AnalysisWorkbook(config_file).expd
+    config_file = config_filename
 
+    if config_file.endswith('xlsx'):
+            config_file_args = dataset.AnalysisWorkbook(config_file, counts_dir=counts_dir).expd
 
     # Stripping out the "comment" lines
     elif config_file.endswith('json'):
@@ -918,15 +822,78 @@ if __name__ == '__main__':
     else:
         raise RuntimeError(f"Unrecognised file type: {config_file}. Only accepts .json or .xlsx")
 
-    # over write yml_args with any specified in the command line
+    return config_file_args
+
+if __name__ == '__main__':
+
+    pipeLOG.info(str(__version__))
+    parser = argparse.ArgumentParser(
+        description="Run mageck and jacks analyses using a JSON file.\n "
+                    "Use arguments below to override JSON options"
+    )
+
+    parser.add_argument(
+        'config_file', metavar='FILE',
+        help = ("path to .xlsx or .json file specifying arguments. JSON must must contain `sample_reps`"
+                ", `analyses` & `control_groups` keywords and values. "
+                "Other options may be overridden by command line arguments.")
+        )
+    parser.add_argument('--counts', metavar='FILE/DIR',
+                        help='Path to counts file, or directory containing counts file(s)'
+                             ' specified in config_file',
+                        default=None, dest='counts_file')
+    parser.add_argument('--output-dir', metavar='PATH', default='.',
+                        help=('Path to where results directory will be created if not current'
+                              ' directory. Experiment_id and analysis_version will determine results dir.') )
+    parser.add_argument('--file-prefix', default='result',
+                        help="String to form identifying prefix for all files generated.")
+    parser.add_argument('--skip-method', metavar='list,of,progs', default=None,
+                        help='Filter analyses methods to be run.')
+    parser.add_argument('--run-groups', metavar='list,of,groups', default=None,
+                        help='Specify control groups (as defined in exp dict) to be included. All included by default.')
+    parser.add_argument('--run-analyses', metavar='list,of,names', default=None,
+                        help='Specify analyses by name to run. Names defined on Analyses sheet or {"name":name} in'
+                             ' analyses dictionaries. All included by default.')
+    parser.add_argument('--dont-log', action='store_true', dest='dont_log', default=None,
+                        help="Don't write a log file.")
+    parser.add_argument('--analysis-version', default=None,
+                        help='Output files will be stored in a directory of the above name, within the experiment dir.')
+    parser.add_argument('--dry-run', action='store_true', default=False,
+                        help='Tries to validate all the options specified without actually running anything. ' 
+                             'Not guaranteed to spot all issues.')
+
+    ## any new args will be passed to run_analyses by default, so delete em before
+    # parser.add_argument('--debug', action='store_true', default=False,
+    #                     help="Set pipeLOG level to debug")
+
+    # get arguments from the command line and the YAML
+    clargs = parser.parse_args() # need to assign this before calling vars() for some reason
+    cmd_line_args = vars(clargs)
+
+    # if cmd_line_args['debug']:
+    #     pipeLOG.setLevel(logging.DEBUG)
+    #     pipeLOG.debug('Debugging level is set')
+    # del cmd_line_args['debug']
+
+    # if the command line arg gives a directory for counts, parse that
+    counts_dir = ''
+    if 'counts_file' in cmd_line_args and cmd_line_args['counts_file']:
+        cntpath = cmd_line_args['counts_file']
+        if os.path.isdir(cntpath):
+            counts_dir = cntpath
+            del cmd_line_args['counts_file']
+        elif not os.path.isfile(cntpath):
+            del cmd_line_args['counts_file']
+
+    config_file_args = load_configuration_file(cmd_line_args['config_file'], counts_dir)
+    #print(config_file_args)
+    # over write config file args with any specified in the command line
     for k, v in cmd_line_args.items():
         if v is not None:
             config_file_args[k] = v
 
     # validate and process arguments
     args = process_arguments(config_file_args)
-
-
 
     run_analyses(**args)
 
