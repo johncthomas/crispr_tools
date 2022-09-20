@@ -31,9 +31,9 @@ def test_count_reads_read_fasta(fn):
     print(seqs[:5])
 
 def test_count_reads_count_reads(fn):
-    from count_reads import count_reads
+    from count_reads import count_reads_from_file
 
-    res = count_reads(fn, (24, 44), )
+    res = count_reads_from_file(fn, (24, 44), )
     print(res.most_common(10))
 
 def test_count_reads_count_batch(fn):

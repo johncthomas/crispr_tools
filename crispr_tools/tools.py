@@ -284,8 +284,6 @@ def tabulate_mageck(prefix, compjoiner=ARROW):
         tab.loc[m, ['lfc', 'fdr_log10', 'p_log10']] = 0
         table[exp] = tab
 
-
-
     return table
 
 def tabulate_drugz(prefix, compjoiner=ARROW):
@@ -347,10 +345,6 @@ def write_repmap(sample_reps:Dict[str, list], ctrlmap:Dict[str, list], repmap_fn
     with open(repmap_fn, 'w') as f:
         for line in reptab:
             f.write('\t'.join(line) + '\n')
-
-
-
-
 
 
 
@@ -438,6 +432,7 @@ def clonal_lfcs(lncounts, ctrl_dict:dict, sample_reps:dict,
 
 
 def write_stats_workbook(sheets: Dict[str, pd.DataFrame], filename=None,
+                         num_format='0.000',
                          workbook:xlsxwriter.Workbook=None,
                          close_workbook=True) -> xlsxwriter.Workbook:
     """First row and column bold text, everything else numbers with 3 d.p.
@@ -446,7 +441,8 @@ def write_stats_workbook(sheets: Dict[str, pd.DataFrame], filename=None,
         sheets: dict containing dataframes to be written, keys used as sheet names.
         filename: The path to which the file will be written. Not required if passing
             an open workbook
-        workbook: An xlsxwriter.Workbook can be passed
+        num_format: Format of numbers, defaults to 3 decimal places.
+        workbook: An xlsxwriter.Workbook instance (optional).
         close_workbook: Close and write the workbook if True.
     """
 
@@ -456,7 +452,7 @@ def write_stats_workbook(sheets: Dict[str, pd.DataFrame], filename=None,
         workbook = xlsxwriter.Workbook(filename, )
     index_format = workbook.add_format({'bold': True, 'num_format': '@', 'align': 'right'})
     header_format = workbook.add_format({'bold': True, 'num_format': '@', 'align': 'center'})
-    num_format = workbook.add_format({'num_format': '0.000'})
+    num_format = workbook.add_format({'num_format': num_format})
 
     for sheet_name, tab in sheets.items():
 
@@ -521,8 +517,15 @@ def load_counts(file_path, index_col='guide', gene_col='gene') -> (pd.DataFrame,
     """
     cnt = pd.read_csv(file_path, sep='\t', index_col=index_col)
     guide_gene = cnt[gene_col]
-    cnt.drop(gene_col, 1, inplace=True)
+    cnt.drop(gene_col, axis=1, inplace=True)
     return cnt, guide_gene
+
+def write_counts(file_path, counts:pd.DataFrame,
+                 guide_gene:pd.Series, gene_col_name='gene'):
+    cnt = counts.copy()
+    cnt.insert(0, gene_col_name, guide_gene)
+    cnt.to_csv(file_path, sep='\t')
+
 
 def load_replicate_sample_details(xlsx) -> (pd.DataFrame, pd.DataFrame):
     """From a screen details Excel file (sheet='Sample details), return DFs
