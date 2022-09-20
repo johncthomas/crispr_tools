@@ -38,6 +38,7 @@ from .tools import (
     write_stats_workbook,
     clonal_lfcs,
     load_counts,
+    write_counts,
     abundance_normalise
 )
 
@@ -51,6 +52,9 @@ import statsmodels.api as sm
 
 OLS = sm.regression.linear_model.OLS
 
+
+def hxbin(x,y, **kwarghole):
+    plt.hexbin(x,y, gridsize=40, bins='log')
 
 is_olfactory = lambda x: x.startswith("OR") and x[2].isnumeric()
 
@@ -158,7 +162,7 @@ def write_excel_text(sheets: Dict[str, pd.DataFrame],
     text_columns = list_not_str(text_columns)
 
     for df in sheets.values():
-        if type(df.columns) == pd.core.index.MultiIndex:
+        if type(df.columns) == pd.MultiIndex:
             raise RuntimeError('MultiIndex columns not supported')
 
     writer = pd.ExcelWriter(filename,
@@ -176,39 +180,39 @@ def write_excel_text(sheets: Dict[str, pd.DataFrame],
         txt = workbook.add_format({'num_format': '@'})
 
         # get the columns to be textualised
-        if text_columns:
-            if text_columns == 'ALL':
+
+        if text_columns == ['ALL']:
+            txtcols = df.columns
+        elif type(text_columns) is Dict:
+            txtcols = text_columns[sheet_name]
+            if txtcols == 'ALL':
                 txtcols = df.columns
-            # if we aren't specifying per sheet
-            elif type(text_columns) is list:
-                txtcols = text_columns
-            else:
-                txtcols = text_columns[sheet_name]
-                if txtcols == 'ALL':
-                    txtcols = df.columns
+        elif (text_columns == None) or (text_columns == False):
+            txtcols = []
+        else:
+            txtcols = list(text_columns)
 
-            # Note: index formats get written over by pd, and any sensible automated
-            #   solution to work around this uses index=False - but that's incompatible with
-            #   multiindex columns for some fucking reason, so there is no good
-            #   solution for dealing with the index until Pandas impliments
-            #   a stable way of disabling automatic formating of the index
+        # Note: index formats get written over by pd, and any sensible automated
+        #   solution to work around this uses index=False - but that's incompatible with
+        #   multiindex columns for some fucking reason, so there is no good
+        #   solution for dealing with the index until Pandas impliments
+        #   a stable way of disabling automatic formating of the index
 
-            index_offset = 1
-            if 'index' in to_excel_kwargs:
-                if not to_excel_kwargs['index']:
-                    index_offset = 0
+        index_offset = 1
+        if 'index' in to_excel_kwargs:
+            if not to_excel_kwargs['index']:
+                index_offset = 0
 
-            # get indicies of named columns
-            col_i = []
-            col_i.extend([list(df.columns).index(c) + index_offset for c in txtcols])
+        # get indicies of named columns
+        col_i = []
+        col_i.extend([list(df.columns).index(c) + index_offset for c in txtcols])
 
-            # set the format of selected columns
-            for i in col_i:
-                worksheet.set_column(i, i, cell_format=txt)
+        # set the format of selected columns
+        for i in col_i:
+            worksheet.set_column(i, i, cell_format=txt)
 
     writer.save()
     return writer
-
 
 
 def underscore_columns(df):
@@ -322,3 +326,5 @@ def minminmaxmax(x,y):
     return (nn, xx)
 
 nlprint = lambda x: print('\n'.join(x))
+
+
