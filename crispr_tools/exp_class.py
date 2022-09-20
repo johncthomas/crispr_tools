@@ -1,15 +1,16 @@
 import pandas as pd
 
-np = pd.np
+import numpy as np
 from typing import Union, List, Dict
 import yaml
-from crispr_tools import *
+from crispr_tools.tools import tabulate_mageck, tabulate_drugz, size_factor_normalise
 from attrdict import AttrDict
 import os
 from crispr_tools.crispr_pipeline import process_control_map
 from crispr_tools.tools import clonal_lfcs
 from copy import copy
 import pathlib
+
 class CrisprExperiment:
     def __init__(self,
 
