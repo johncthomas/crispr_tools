@@ -546,6 +546,9 @@ def get_treatment_str(samp_deets:pd.DataFrame, ctrl:str, treat:str):
     else:
         if is_nt(c_deets.KO) or (c_deets.KO == t_deets.KO):
             ko_str = t_deets.KO+'-KO'
+            # if it's just in a TP53 background we don't care that much
+            if ko_str == 'TP53':
+                ko_str = ''
         else:
             ko_str = f"{c_deets.KO}-KO{fatarrow}{t_deets.KO}-KO"
 
