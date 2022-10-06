@@ -32,7 +32,7 @@ setup(
         'depreciated':['yaml']
     },
     
-    python_requires = '>3.5',
+    python_requires = '>3.5, <3.10',
     scripts=['crispr_tools/crispr_pipeline.py', 'crispr_tools/count_reads.py'],
     include_package_data=True,
 )
