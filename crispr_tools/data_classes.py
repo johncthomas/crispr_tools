@@ -10,6 +10,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import xlsxwriter
 
 from crispr_tools.tools import tabulate_drugz, tabulate_mageck
 from typing import Union, List, Dict, Any, Collection, Tuple
@@ -24,6 +25,12 @@ analysis_short_names = {'drugz':'drz', 'mageck':'mag'}
 analysis_score_names = {'drugz':'normZ', 'mageck':'lfc'}
 
 
+
+# statistc_colo = [scorek, 'fdr', 'neg_p', 'pos_p', 'fdr_log10']
+# stat_renamed_cols = [scorek, 'FDR', 'Dropout p', 'Enrich p', 'Log10(FDR)']
+
+ARROW = '→'
+
 class AnalysisWorkbook:
     """Parse an Excel workbook describing how an experiment should be analysed.
     Generates the dict for JSON or calling .run_analyses
@@ -37,7 +44,7 @@ class AnalysisWorkbook:
         """
         Args:
             counts_dir: directory containing counts files specified in the
-                Analyses sheet."""
+                Analyses sheet. This will be added to """
 
         self.safesplit = lambda x: x.replace(' ', '').split(',')
         self.fn = xlfn
@@ -122,7 +129,7 @@ class AnalysisWorkbook:
         repdeets = self.wb['Replicate details']
         ctrlgrps = self.wb['Control groups']
 
-        # all "Experiment details" k:v are top level and don't need processing
+        # all "Experiment details" k:v are top level and don't need processingaa
         experiment_dictionary = {}
 
         # Some expd options will be in the workbook, store them with the appropriate
@@ -136,6 +143,9 @@ class AnalysisWorkbook:
             # some workbooks have them written in the internal style...
             'analysis_version': 'analysis_version',
             'file_prefix': 'file_prefix',
+            # legacy labels...
+            'Analysis name':'experiment_id',
+            'Library':'library',
         }.items():
             try:
                 experiment_dictionary[dict_key] = deets[col_ind]
@@ -213,10 +223,11 @@ class AnalysisWorkbook:
                     pipeLOG.info(f"Arguments: {rowargs} parsed to {kwargs}")
 
                 # deal with paired, which is handled different in the programs
-                if row['Paired'] and (method == 'mageck'):
-                    andict['kwargs']['paired'] = ''
-                elif not row['Paired'] and (method == 'drugz'):
-                    andict['kwargs']['unpaired'] = True
+                if not pd.isna(row['Paired']):
+                    if row['Paired'] and (method == 'mageck'):
+                        andict['kwargs']['paired'] = ''
+                    elif not row['Paired'] and (method == 'drugz'):
+                        andict['kwargs']['unpaired'] = True
 
                 # Name is an optional col
                 if 'Name' in row and row['Name']:
@@ -274,6 +285,127 @@ class AnalysisWorkbook:
             print(f'There are {len(missing_comps)} missing comparisons in {xd["Experiment name"]}')
         else:
             print(f'{xd["Experiment name"]} appears to have all comparisons written.')
+
+
+def write_analysis_output_excel(
+        results_table:Union[pd.DataFrame, str],
+        control_groups:pd.DataFrame,
+        out_prefix,
+        analysis_type,
+        one_file_per_ctrlgrp=True):
+    """Write excel workbooks for each control group in an analysis"""
+
+    if type(results_table) != pd.DataFrame:
+        results_table = pd.read_csv(results_table, header=[0,1], index_col=0)
+
+    def write_number_sheet(sheet, df):
+        """Writes columns and row names formated as string,
+        and numbers formated with 3 dp"""
+        # write the index header
+        sheet.write(0, 0, 'Gene')
+
+        # write the stats headers
+        for coli, c in enumerate(df.columns):
+            # print(c)
+            sheet.write(0, coli + 1, c, header_format)
+
+        # row labels
+        for row_i, gene in enumerate(df.index):
+            sheet.write(1 + row_i, 0, gene, index_format)
+
+        # data
+        for col_i, col in enumerate(df):
+            for row_i, val in enumerate(df[col]):
+                try:
+                    sheet.write(row_i + 1, col_i + 1, val, num_format)
+                # catch nans
+                except TypeError:
+                    if pd.isna(val):
+                        pass
+                    else:
+                        raise
+
+    def color_scale_score(sheet, first_row, first_col, last_row, last_col):
+        sheet.conditional_format(
+            first_row, first_col, last_row, last_col,
+            {
+                'type': '3_color_scale',
+                'min_type': 'num',
+                'mid_type': 'num',
+                'max_type': 'num',
+                'min_value': -3,
+                'mid_value': 0,
+                'max_value': 3,
+                'min_color': '#ff5030',
+                'mid_color': '#ffffff',
+                'max_color': '#6699ff'
+            }
+        )
+
+    def color_scale_fdr(sheet, first_row, first_col, last_row, last_col):
+        sheet.conditional_format(
+            first_row, first_col, last_row, last_col,
+            {
+                'type': '2_color_scale',
+                'min_type': 'num',
+                'max_type': 'num',
+                'min_value': 0.001,
+                'max_value': 0.25,
+                'min_color': '#3cdd3c',
+                'max_color': '#ffffff'
+            }
+        )
+
+    scorek = analysis_score_names[analysis_type] ###
+    stat_cols = [scorek, 'fdr', 'neg_p', 'pos_p', 'fdr_log10']
+    stat_renamed_cols = [scorek, 'FDR', 'Dropout p', 'Enrich p', 'Log10(FDR)']
+    control_groups.loc[:, 'Timepoint'] = control_groups['Group'].map(lambda x: x.split('_')[0])
+
+    if one_file_per_ctrlgrp:
+        tpgrps = control_groups.groupby('Timepoint').groups
+    else:
+        tpgrps = {'all_results':control_groups.index}
+
+    for grp, indx in tpgrps.items():
+        filename = f'{out_prefix}.{grp}.xlsx'
+
+        workbook = xlsxwriter.Workbook(filename, )
+        index_format = workbook.add_format({'bold': True, 'num_format': '@', 'align': 'right'})
+        header_format = workbook.add_format({'bold': True, 'num_format': '@', 'align': 'center'})
+        num_format = workbook.add_format({'num_format': '0.000'})
+
+        grpdict = {}
+        T = control_groups.loc[indx]
+        comps = T['Control sample'] + '-' + T['Test sample']
+
+        # Write sheet of just scores
+        score = results_table.xs(scorek, 1, 1).loc[:, comps]
+        scoresheet = workbook.add_worksheet(name=scorek)
+        write_number_sheet(
+            scoresheet,
+            score
+        )
+        color_scale_score(
+            scoresheet,
+            1, 1,
+            score.shape[0]+1,
+            score.shape[1]+1
+        )
+
+        # write all the per comparison sheets
+        for comp in comps:
+            grpdict[comp] = res = results_table.loc[:, (comp, stat_cols)]
+            res.columns = stat_renamed_cols
+            res.sort_values(scorek, inplace=True)
+            sheet = workbook.add_worksheet(name=comp.replace('-', ARROW))
+
+            write_number_sheet(sheet, res)
+            last_row = res.shape[0] + 1
+
+            color_scale_score(sheet, 1, 1, last_row, 1)
+            color_scale_fdr(sheet, 1, 2, last_row, 2)
+
+        workbook.close()
 
 
 class CrisprCounts:
@@ -532,8 +664,9 @@ def get_treatment_str(samp_deets:pd.DataFrame, ctrl:str, treat:str):
 
     # get chem treat str
     if not is_nt(t_deets.Treatment):
-        if is_nt(c_deets.Treatment):
+        if is_nt(c_deets.Treatment) or (c_deets.Treatment == t_deets.Treatment):
             chem_str = t_deets.Treatment
+        # if both ctrl/treat samps are different treatments
         else:
             chem_str = f"{c_deets.Treatment}{fatarrow}{t_deets.Treatment}"
     else:
@@ -547,7 +680,7 @@ def get_treatment_str(samp_deets:pd.DataFrame, ctrl:str, treat:str):
         if is_nt(c_deets.KO) or (c_deets.KO == t_deets.KO):
             ko_str = t_deets.KO+'-KO'
             # if it's just in a TP53 background we don't care that much
-            if ko_str == 'TP53':
+            if ko_str == 'TP53-KO':
                 ko_str = ''
         else:
             ko_str = f"{c_deets.KO}-KO{fatarrow}{t_deets.KO}-KO"
@@ -567,104 +700,106 @@ def get_treatment_str(samp_deets:pd.DataFrame, ctrl:str, treat:str):
 
     return treatment_str
 
-def parse_analysis_metadata(analysis_workbook:str, suppress_expid=False):
-    """Write comparisons_metadata.csv and exeriments_metadata.csv.
 
-    Args:
-        suppress_expid: Don't prefix expid to comparison IDs"""
-
-    # parse out the tables from the workbook
-    deets = pd.read_excel(analysis_workbook, sheet_name=None)
-
-    rep_deets = deets['Replicate details']
-    samp_deets = rep_deets.drop_duplicates('Sample').set_index('Sample')
-
-    # Experiment details parsed to a dictionary
-    exp_deets = deets['Experiment details']
-    exp_deets = exp_deets.set_index(exp_deets.columns[0]).iloc[:, 0].to_dict()
-    expid = deets['Experiment details'].columns[-1]
-    exp_deets['ExpID'] = expid
-    exp_deets['Experiment name'] = expid
-    comp_table = deets['Control groups']
-
-    analyses = deets['Analyses']
-
-    # Get the analysis methods used for each group (which will
-    #   be output as 'Available analyses' for each comp)
-    safesplit = lambda x: x.replace(' ', '').split(',')
-    grp_method = {}
-    for _, row in analyses.iterrows():
-        for grp in safesplit(row['Control group']):
-            for meth in safesplit(row['Method']):
-                try:
-                    grp_method[grp].append(meth)
-                except KeyError:
-                    grp_method[grp] = [meth]
-
-    # construct the comparisons table; first as List[Dict]
-    comparisons_metadata = []
-    for _, row in comp_table.iterrows():
-        ctrl = row['Control sample']
-        test = row['Test sample']
-        ctrl_group = row['Group']
-
-        treat_row = samp_deets.loc[test].fillna('')
-
-        compid = f"{ctrl}-{test}"
-        if not suppress_expid:
-            compid = f"{expid}.{compid}"
-
-        out_row = {
-            'Comparison ID':compid,
-            'Experiment ID':expid,
-            # timepoint should just be 'endpoints', 'otherprior', or 'fromstart'.
-            'Timepoint':ctrl_group.split('_')[0],
-            'Treatment':get_treatment_str(samp_deets, ctrl, test),
-        }
-        # these values copied verbatim
-        for k in ('Dose', 'Growth inhibition %', 'Days grown', 'Cell line', 'KO'):
-            out_row[k] = treat_row[k]
-
-        out_row['Library'] = exp_deets['Library']
-
-        out_row['Available analyses'] = '|'.join(grp_method[ctrl_group])
-        out_row['Control group'] = ctrl_group
-        comparisons_metadata.append(out_row)
-    comparisons_metadata = pd.DataFrame(comparisons_metadata, ).set_index('Comparison ID')
-
-    comparisons_metadata.loc[comparisons_metadata.KO == '',  'KO'] = 'WT'
-
-    # Construct the experiments table, this is just copied from the
-    #   experiments sheet.
-    exp_deets['Treatments'] = '|'.join(samp_deets.Treatment.dropna().unique())
-    experiments_metadata = pd.DataFrame([exp_deets]).set_index('ExpID')
-
-    return experiments_metadata, comparisons_metadata
-
-def consolidate_metadata(workbooks:List[str], outdir=None):
-    """Consolidate metadata contained in provided list of analysis workbooks."""
-
-    # Consolidate
-    exp_metadatas = []
-    comp_metadatas = []
-    for fn in workbooks:
-        exp, comp = parse_analysis_metadata(fn)
-        exp_metadatas.append(exp)
-        comp_metadatas.append(comp)
-    comp_metadatas = pd.concat(comp_metadatas, axis=0)
-    exp_metadatas = pd.concat(exp_metadatas, axis=0)
-
-    if outdir:
-        comp_metadatas.to_csv(
-            os.path.join(outdir, 'comparisons_metadata.csv'),
-            encoding='utf-8-sig'
-        )
-        exp_metadatas.to_csv(
-            os.path.join(outdir, 'experiments_metadata.csv'),
-            encoding='utf-8-sig'
-        )
-
-    return exp_metadatas, comp_metadatas
+# # pretty sure this is all replaced by code in pipeline_to_viewer
+# def parse_analysis_metadata(analysis_workbook:str, suppress_expid=False):
+#     """Write comparisons_metadata.csv and exeriments_metadata.csv.
+#
+#     Args:
+#         suppress_expid: Don't prefix expid to comparison IDs"""
+#
+#     # parse out the tables from the workbook
+#     deets = pd.read_excel(analysis_workbook, sheet_name=None)
+#
+#     rep_deets = deets['Replicate details']
+#     samp_deets = rep_deets.drop_duplicates('Sample').set_index('Sample')
+#
+#     # Experiment details parsed to a dictionary
+#     exp_deets = deets['Experiment details']
+#     exp_deets = exp_deets.set_index(exp_deets.columns[0]).iloc[:, 0].to_dict()
+#     expid = deets['Experiment details'].columns[-1]
+#     exp_deets['ExpID'] = expid
+#     exp_deets['Experiment name'] = expid
+#     comp_table = deets['Control groups']
+#
+#     analyses = deets['Analyses']
+#
+#     # Get the analysis methods used for each group (which will
+#     #   be output as 'Available analyses' for each comp)
+#     safesplit = lambda x: x.replace(' ', '').split(',')
+#     grp_method = {}
+#     for _, row in analyses.iterrows():
+#         for grp in safesplit(row['Control group']):
+#             for meth in safesplit(row['Method']):
+#                 try:
+#                     grp_method[grp].append(meth)
+#                 except KeyError:
+#                     grp_method[grp] = [meth]
+#
+#     # construct the comparisons table; first as List[Dict]
+#     comparisons_metadata = []
+#     for _, row in comp_table.iterrows():
+#         ctrl = row['Control sample']
+#         test = row['Test sample']
+#         ctrl_group = row['Group']
+#
+#         treat_row = samp_deets.loc[test].fillna('')
+#
+#         compid = f"{ctrl}-{test}"
+#         if not suppress_expid:
+#             compid = f"{expid}.{compid}"
+#
+#         out_row = {
+#             'Comparison ID':compid,
+#             'Experiment ID':expid,
+#             # timepoint should just be 'endpoints', 'otherprior', or 'fromstart'.
+#             'Timepoint':ctrl_group.split('_')[0],
+#             'Treatment':get_treatment_str(samp_deets, ctrl, test),
+#         }
+#         # these values copied verbatim
+#         for k in ('Dose', 'Growth inhibition %', 'Days grown', 'Cell line', 'KO'):
+#             out_row[k] = treat_row[k]
+#
+#         out_row['Library'] = exp_deets['Library']
+#
+#         out_row['Available analyses'] = '|'.join(grp_method[ctrl_group])
+#         out_row['Control group'] = ctrl_group
+#         comparisons_metadata.append(out_row)
+#     comparisons_metadata = pd.DataFrame(comparisons_metadata, ).set_index('Comparison ID')
+#
+#     comparisons_metadata.loc[comparisons_metadata.KO == '',  'KO'] = 'WT'
+#
+#     # Construct the experiments table, this is just copied from the
+#     #   experiments sheet.
+#     exp_deets['Treatments'] = '|'.join(samp_deets.Treatment.dropna().unique())
+#     experiments_metadata = pd.DataFrame([exp_deets]).set_index('ExpID')
+#
+#     return experiments_metadata, comparisons_metadata
+#
+# def consolidate_metadata(workbooks:List[str], outdir=None):
+#     """Consolidate metadata contained in provided list of analysis workbooks."""
+#
+#     # Consolidate
+#     exp_metadatas = []
+#     comp_metadatas = []
+#     for fn in workbooks:
+#         exp, comp = parse_analysis_metadata(fn)
+#         exp_metadatas.append(exp)
+#         comp_metadatas.append(comp)
+#     comp_metadatas = pd.concat(comp_metadatas, axis=0)
+#     exp_metadatas = pd.concat(exp_metadatas, axis=0)
+#
+#     if outdir:
+#         comp_metadatas.to_csv(
+#             os.path.join(outdir, 'comparisons_metadata.csv'),
+#             encoding='utf-8-sig'
+#         )
+#         exp_metadatas.to_csv(
+#             os.path.join(outdir, 'experiments_metadata.csv'),
+#             encoding='utf-8-sig'
+#         )
+#
+#     return exp_metadatas, comp_metadatas
 
 
 

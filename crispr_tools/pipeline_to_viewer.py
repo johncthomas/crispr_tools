@@ -15,7 +15,7 @@ import pandas as pd
 import re
 import os
 
-from crispr_tools.dataset import (
+from crispr_tools.data_classes import (
     analysis_short_names,
     analysis_score_names,
     get_treatment_str,

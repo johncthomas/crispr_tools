@@ -13,7 +13,7 @@ from attrdict import AttrDict
 
 import pandas as pd
 #import matplotlib.pyplot as plt
-from crispr_tools import dataset
+from crispr_tools import data_classes
 
 ARROW = '→'
 # todo don't write drugz tables until everything is run
