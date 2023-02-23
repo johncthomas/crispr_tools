@@ -217,7 +217,7 @@ def call_drugZ_batch(sample_reps:Dict[str, list],
     kwargs = kwargs
     if kwargs is None:
         kwargs = {}
-
+    #todo remove attrdict usage
     dzargs = AttrDict()
     dzargs.infile = counts_file
     # defaults
