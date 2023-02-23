@@ -12,9 +12,8 @@ import numpy as np
 import pandas as pd
 import xlsxwriter
 
-from crispr_tools.tools import tabulate_drugz, tabulate_mageck
+
 from typing import Union, List, Dict, Any, Collection, Tuple
-from crispr_tools.tools import is_ntctrl
 
 import logging
 LOG = logging.getLogger(__name__, )
@@ -23,7 +22,17 @@ LOG.setLevel(logging.INFO) # need to set the logger to the lowest level...
 
 analysis_short_names = {'drugz':'drz', 'mageck':'mag'}
 analysis_score_names = {'drugz':'normZ', 'mageck':'lfc'}
-
+statistic_labels = {
+    'lfc': 'Log2(FC)',
+    'normZ': 'NormZ',
+    'neg_p': 'Sensitising p-value',
+    'pos_p': 'Suppressing p-value',
+    'neg_fdr': 'Sensitising FDR',
+    'pos_fdr': 'Suppressing FDR',
+    'fdr': 'FDR',
+    'p': 'p-value',
+    'fdr_log10': '-log10(FDR)'
+}
 
 
 # statistc_colo = [scorek, 'fdr', 'neg_p', 'pos_p', 'fdr_log10']
