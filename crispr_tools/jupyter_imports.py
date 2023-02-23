@@ -3,9 +3,11 @@
 import platform, pathlib
 import os
 from typing import Dict, List, Union, Tuple
+import typing
 import itertools
 from itertools import combinations, combinations_with_replacement
 import attrdict
+import collections
 
 import pandas as pd
 import numpy as np
@@ -18,12 +20,15 @@ from functools import partial
 revcomp = lambda s: ''.join([dict(zip('ACTGN', 'TGACN'))[nt] for nt in s[::-1]])
 import logging
 
+
 pltlogger = logging.getLogger('matplotlib')
 pltlogger.setLevel(logging.WARNING)
 
 
 from crispr_tools import tools, jacks_tools, crispr_pipeline, drugz
 from IPython.display import display
+
+from pathlib import Path
 
 try:
     from jacks.jacks_io import runJACKS
@@ -52,6 +57,8 @@ import statsmodels.api as sm
 
 OLS = sm.regression.linear_model.OLS
 
+
+csv_good_encoding = 'utf-8-sig'
 
 def hxbin(x,y, **kwarghole):
     plt.hexbin(x,y, gridsize=40, bins='log')
@@ -325,6 +332,70 @@ def minminmaxmax(x,y):
     xx = max([max(x), max(y)])
     return (nn, xx)
 
-nlprint = lambda x: print('\n'.join(x))
+
+def nlprint(things:typing.Collection[str], sort=False):
+    if sorted:
+        things = sorted(things)
+    print('\n'.join(things))
+
+data = np.random.randn(100)
 
 
+
+width = 0.8     # the maximum width of each 'row' in the scatter plot
+
+
+def jitter_density_plot(
+        data: Union[pd.DataFrame, Dict],
+        width=0.8,
+        equal_width=True,
+        ax=None,
+        tick_labels=None,
+        per_column_kwargs: List[Dict] = None,
+        **scatter_kwargs):
+    # The other thing I could do here is generate just a list of jittered x values
+    """Jitter plots scaled with width scaled to density.
+    Data is series of values in an obj with keys."""
+
+    if tick_labels is None:
+        try:
+            tick_labels = data.columns
+        except:
+            try:
+                tick_labels = list(data.keys())
+            except:
+                raise TypeError(f"Don't know how to get tick labels from object type {type(data)}. "
+                                f"Please supply tick_labels or use a different object.")
+    if type(data) is dict:
+        data = pd.Series(data)
+    if scatter_kwargs is None:
+        scatter_kwargs = {}
+    if ax is None:
+        ax = plt.gca()
+
+    for xpos, col in enumerate(data):
+        if per_column_kwargs is not None:
+            col_kwargs = per_column_kwargs[xpos]
+        else:
+            col_kwargs = {}
+        y = data[col]
+
+        y = pd.Series(y).dropna()
+        kde = stats.gaussian_kde(y)
+        # estimate the local density at each datapoint
+        density = kde(y)
+        if equal_width:
+            density = density / max(density) * 0.8
+        # generate some random jitter between 0 and 1
+        jitter = np.random.rand(len(y)) - 0.5
+
+        # scale the jitter by the KDE estimate and add it to the centre x-coordinate
+        xvals = xpos + (density * jitter * width)
+
+        ax.scatter(xvals, y, **(scatter_kwargs|col_kwargs))
+
+    ax.set_xticks(range(0, data.shape[1]), tick_labels)
+
+
+def string_to_df(s, sep='\t'):
+    return pd.DataFrame([l.split(sep) for l in s.split('\n')])
