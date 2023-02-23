@@ -10,9 +10,15 @@ from pathlib import Path, PosixPath, WindowsPath
 import pandas as pd
 from itertools import zip_longest
 from attrdict import AttrDict
+
 import statsmodels.api as sm
 OLS = sm.regression.linear_model.OLS
 import xlsxwriter
+
+from crispr_tools.data_classes import (
+    analysis_score_names,
+    statistic_labels
+)
 ARROW = '→'
 #import multiprocessing as mp
 
@@ -211,10 +217,11 @@ def ROC_values(values:pd.Series, things_oi:pd.Series):
     """
     :param values: Series, index with labels, values used to do the ROC
     :param things_oi: Labels found in values.index that are "true"
-    :return:
+    :return: x y values for plot, y being proportion of ordered value labels
+        found in things_oi
     """
-    things_oi = things_oi[things_oi.isin(values.index)]
-
+    if type(things_oi) in (np.ndarray, list, tuple):
+        things_oi = pd.Series(things_oi, index=things_oi)
     col = values.dropna().sort_values()
     toi = things_oi[things_oi.isin(col.index)]
     y = np.cumsum(col.index.isin(toi)) / len(toi)
@@ -229,10 +236,13 @@ def iter_files_by_prefix(prefix:Union[str, Path], req_suffix=None):
     check_suffix = lambda s: s.endswith(req_suffix) if req_suffix is not None else True
 
     for fn in os.listdir(prefix.parent):
-        # filter incorrect files, the '._' are mac files that are not ignored automatically on unix filesystem
-        if not check_suffix(fn) or \
-                prefix.parts[-1] not in fn or \
-                fn.startswith('._'):
+        # filter incorrect files, the '._' are mac files that are not
+        # ignored automatically on unix filesystem
+        if not (
+            check_suffix(fn) or
+            (prefix.parts[-1] not in fn) or
+            fn.startswith('._')
+        ):
             continue
         yield fn
 
@@ -279,7 +289,7 @@ def tabulate_mageck(prefix, compjoiner=ARROW):
     table = pd.DataFrame(index=tab.index, columns=tbcolumns)
     for exp, tab in tables.items():
         # deal with missing genes
-        m = tab.isna().any(1)
+        m = tab.isna().any(axis=1)
         tab.loc[m, :] = 1
         tab.loc[m, ['lfc', 'fdr_log10', 'p_log10']] = 0
         table[exp] = tab
@@ -434,7 +444,8 @@ def clonal_lfcs(lncounts, ctrl_dict:dict, sample_reps:dict,
 def write_stats_workbook(sheets: Dict[str, pd.DataFrame], filename=None,
                          num_format='0.000',
                          workbook:xlsxwriter.Workbook=None,
-                         close_workbook=True) -> xlsxwriter.Workbook:
+                         close_workbook=True,
+                         freeze_indexes:Union[bool, dict]=True,) -> xlsxwriter.Workbook:
     """First row and column bold text, everything else numbers with 3 d.p.
 
     Args:
@@ -444,6 +455,8 @@ def write_stats_workbook(sheets: Dict[str, pd.DataFrame], filename=None,
         num_format: Format of numbers, defaults to 3 decimal places.
         workbook: An xlsxwriter.Workbook instance (optional).
         close_workbook: Close and write the workbook if True.
+        freeze_indexes: Freeze the first column and row in each sheet. Set True to freeze
+            all, or pass a dict with sheetName->bool to specify sheets.
     """
 
     if workbook is None:
@@ -471,10 +484,78 @@ def write_stats_workbook(sheets: Dict[str, pd.DataFrame], filename=None,
 
         for col_i, col in enumerate(tab):
             for row_i, val in enumerate(tab[col]):
-                sheet.write(row_i + 1, col_i + 1, val, num_format)
+                try:
+                    sheet.write(row_i + 1, col_i + 1, val, num_format)
+                except TypeError:
+                    if pd.isna(val):
+                        pass
+                    else:
+                        raise
+
+        # freeze index row/column
+        try:
+            freeze = freeze_indexes[sheet_name]
+        except:
+            freeze = freeze_indexes
+        if freeze:
+            sheet.freeze_panes(0, 0)
+
     if close_workbook:
         workbook.close()
     return workbook
+
+
+def convert_stats_csv_to_excel(
+        intable: Union[str, pd.DataFrame],
+        analysis_type: str,
+        outpath: str = None,
+        selected_comparisons: List[str] = False,
+
+):
+    """Read or recieve a table output by a tablulate_[method] function,
+    where .columns.levels[0] is comparisons, and levels[1] are
+    statistics. Output an Excel workbook with one tab per comparison,
+    and renamed (to be clearer) statistic names.
+
+    Args:
+        intable: a DF or path to a DF
+        analysis_type: (long) name of the analysis being loaded
+        outpath: where the xlsx will be written, if None return {comp:DF}
+            of formated tables.
+        selected_comparisons: Write only specific comparisons from intable
+    """
+
+    addarrow = lambda s: s.replace('-', f' {ARROW} ')
+
+    scorek = analysis_score_names[analysis_type]
+
+    if type(intable) is not pd.DataFrame:
+        fulltable = pd.read_csv(intable, header=[0, 1], index_col=0)
+    else:
+        fulltable = intable
+
+    if selected_comparisons is False:
+        selected_comparisons = fulltable.columns.levels[0]
+
+    outtables = {}
+    scores = fulltable.xs(scorek, axis=1, level=1)
+    scores.columns = scores.loc[:, selected_comparisons].columns.map(addarrow)
+    outtables[f"All {statistic_labels[scorek]}"] = scores
+    for c in selected_comparisons:
+        table = fulltable[c]
+        table = table.loc[:, [scorek] + ['fdr', 'neg_p', 'pos_p']].sort_values('neg_p')
+        table.columns = table.columns.map(statistic_labels)
+
+        outtables[addarrow(c)] = table
+
+    if outpath is not None:
+        write_stats_workbook(
+            outtables,
+            outpath,
+            num_format='0.00',
+        )
+    else:
+        return outtables
 
 def quantile_normalise(df):
     rank_mean = df.stack().groupby(df.rank(method='first').stack().astype(int)).mean()
