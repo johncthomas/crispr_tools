@@ -284,7 +284,8 @@ def call_drugZ_batch(sample_reps:Dict[str, list],
 
 
 def call_mageck(control_samp:str, treat_samp:str, sample_reps:Dict[str, List[str]],
-                counts_file:str, prefix:str, kwargs:List[Dict], logger=None, dryrun=False):
+                counts_file:str, prefix:str, kwargs:Dict,
+                logger=None, dryrun=False, ):
     """Call mageck from the command line:
         "mageck test -k {counts} -t {treat} -c {ctrl} -n {outprefix}{ctrlnm}-{sampnm}"
 
@@ -673,14 +674,6 @@ def run_analyses(output_dir, file_prefix,
     if skip_method is None:
         skip_method = []
 
-    # # this should be handled before calling this function by removing undesired groups
-    # if run_groups is None:
-    #     group_included = lambda x: True
-    # else:
-    #     run_groups = list_not_str(run_groups)
-    #     group_included = lambda x: x in run_groups
-    #     pipeLOG.info(f'Running only control groups: {run_groups}')
-
     # Create the root experiment directory
     p = str(output_dir)
     os.makedirs(p, exist_ok=True)
@@ -803,7 +796,7 @@ def load_configuration_file(config_filename, counts_dir='.') -> dict:
     config_file = config_filename
 
     if config_file.endswith('xlsx'):
-            config_file_args = dataset.AnalysisWorkbook(config_file, counts_dir=counts_dir).expd
+            config_file_args = data_classes.AnalysisWorkbook(config_file, counts_dir=counts_dir).expd
 
     # Stripping out the "comment" lines
     elif config_file.endswith('json'):
