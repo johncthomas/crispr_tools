@@ -39,6 +39,17 @@ from crispr_tools.tools import list_not_str
 # with open(pathlib.Path(__file__).parent/'version.txt') as f:
 #     __version__ = f.readline().replace('\n', '')
 
+def file_exists_or_zero(fn):
+    """Determine whether the output drugz/mageck file already exists and contains
+    data. Returns True if the file exists and is not zero bytes. Returns False
+    if the file does not exist or it does exist but is zero bytes. Used for
+    checkpointing purposes. Analysis steps will skip if the output drugz/mageck file
+    exists and is not size zero bytes (function returns True)."""
+    if os.path.exists(fn) and os.path.getsize(fn) != 0:
+        return True
+    else:
+        return False
+
 class PipelineOptionsError(Exception):
     """Errors in the configuration file that would prevent the pipeline from running"""
     pass
@@ -256,27 +267,32 @@ def call_drugZ_batch(sample_reps:Dict[str, list],
             )
 
             dzargs.drugz_output_file = f"{prefix}.{ctrl_samp}-{treat_samp}.tsv".replace('//', '/')
+            
+            if not file_exists_or_zero(dzargs.drugz_output_file):
 
-            if drop_guide_less_than:
-                reps = list_not_str(sample_reps[ctrl_samp]) \
-                       + list_not_str(sample_reps[treat_samp])
-
-                cnt_lessthan = (cnt.loc[:, reps] < drop_guide_less_than)
-                # if add more types here, add new keywords to assertion at top of func
-                if drop_guide_type == 'any':
-                    bad_guides = cnt_lessthan.any(1)
-                #elif drop_guide_type in ('both', 'all'):
-                else:
-                     bad_guides = cnt_lessthan.all(1)
-
-                cnt.loc[~bad_guides, ['gene']+reps].to_csv(tmpfn, sep='\t')
-                pipeLOG.info(
-                    f"call_drugZ_batch: {sum(bad_guides)} guides removed "
-                    f"from {ctrl_samp}-{treat_samp}, using less than {drop_guide_less_than} "
-                    f"with '{drop_guide_type}' method."
-                )
-
-            drugZ_analysis(dzargs)
+                if drop_guide_less_than:
+                    reps = list_not_str(sample_reps[ctrl_samp]) \
+                           + list_not_str(sample_reps[treat_samp])
+    
+                    cnt_lessthan = (cnt.loc[:, reps] < drop_guide_less_than)
+                    # if add more types here, add new keywords to assertion at top of func
+                    if drop_guide_type == 'any':
+                        bad_guides = cnt_lessthan.any(1)
+                    #elif drop_guide_type in ('both', 'all'):
+                    else:
+                         bad_guides = cnt_lessthan.all(1)
+    
+                    cnt.loc[~bad_guides, ['gene']+reps].to_csv(tmpfn, sep='\t')
+                    pipeLOG.info(
+                        f"call_drugZ_batch: {sum(bad_guides)} guides removed "
+                        f"from {ctrl_samp}-{treat_samp}, using less than {drop_guide_less_than} "
+                        f"with '{drop_guide_type}' method."
+                    )
+    
+                drugZ_analysis(dzargs)
+            
+            else:
+                pipeLOG.info('Output DrugZ analysis exists: ' + dzargs.drugz_output_file + ". Not running DrugZ.")
 
     if drop_guide_less_than:
         os.remove(tmpfn)
@@ -353,16 +369,23 @@ def call_mageck_batch(sample_reps:Dict[str, list],
         counts_file = tmp_fn
 
     for ctrl_samp, treat_samples in control_map.items():
-
+        
         if type(treat_samples) is str:
             treat_samples = [treat_samples]
 
         for treat in treat_samples:
             if treat == ctrl_samp:
                 continue
+            
+            outfn = '{outprefix}.{ctrlnm}-{sampnm}.gene_summary.txt'.format(outprefix=prefix, ctrlnm=ctrl_samp, sampnm=treat)
+            if not file_exists_or_zero(outfn):
 
-            call_mageck(ctrl_samp, treat, sample_reps, counts_file, prefix, kwargs)
-            mageck_pairs_done.append((ctrl_samp, treat))
+                call_mageck(ctrl_samp, treat, sample_reps, counts_file, prefix, kwargs)
+                mageck_pairs_done.append((ctrl_samp, treat))
+                
+            else:
+                pipeLOG.info('Output MAGeCK analysis exists: ' + outfn + ". Not running MAGeCK.")
+
 
     # delete the file with additional pseudocount, if there is one.
     if tmp_fn is not None:
