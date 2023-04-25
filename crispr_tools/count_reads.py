@@ -33,7 +33,9 @@ and that the sequence to be mapped is in the same position in every read
 Produces dereplicated sequence counts (one file per sample) and then a single
 file containing reads mapped to guide/gene from a library file."""
 
-__version__ = '1.8.1'
+__version__ = '1.8.2'
+# 1.8.2 added checkpointing. If rawcounts file(s) already exist, then they won't
+#       be re-generated. Does not check actual contents of existing files.
 # 1.8.1 bugfix in merge samples. Won't work with runs that have more than 9 lanes
 # 1.8.0 added back fuzzy matching, more efficiently this time
 # 1.7.0 adding permenant logging
@@ -180,6 +182,17 @@ def get_file_list(files_dir) -> List[os.PathLike]:
     LOG.debug(f"get_file_list out: {file_list}")
     return file_list
 
+def file_exists_or_zero(fn):
+    """Determine whether the output rawcounts file already exists and contains
+    data. Returns True if the file exists and is not zero bytes. Returns False
+    if the file does not exist or it does exist but is zero bytes. Used for
+    checkpointing purposes. Count steps will skip if the output rawcounts file
+    exists and is not size zero bytes (function returns True)."""
+    if os.path.exists(fn) and os.path.getsize(fn) != 0:
+        return True
+    else:
+        return False
+
 
 def count_batch(fn_or_dir, slicer, fn_prefix='', seq_len=None, seq_offset=0, fn_suffix='.rawcount',
                 fn_split='_R1_', merge_samples=False, just_go=False, quiet=False,
@@ -291,7 +304,8 @@ def count_batch(fn_or_dir, slicer, fn_prefix='', seq_len=None, seq_offset=0, fn_
         LOG.info(lengthstring)
 
     # called in the main loop
-    def write_count(a_cnt, fn_base):
+    
+    def get_outfn(fn_base):
         if fn_prefix:
             if fn_prefix[-1] == '/':
                 fs = '{}{}{}.txt'
@@ -300,6 +314,10 @@ def count_batch(fn_or_dir, slicer, fn_prefix='', seq_len=None, seq_offset=0, fn_
             outfn = fs.format(fn_prefix, fn_base, fn_suffix)
         else:
             outfn = '{}.{}.txt'.format(fn_base, fn_suffix)
+        return(outfn)
+    
+    def write_count(a_cnt, fn_base):
+        outfn = get_outfn(fn_base)
         with open(outfn, 'w') as f:
             for s, n in a_cnt.most_common():
                 f.write('{}\t{}\n'.format(s,n))
@@ -311,19 +329,28 @@ def count_batch(fn_or_dir, slicer, fn_prefix='', seq_len=None, seq_offset=0, fn_
     if merge_samples:
         LOG.debug(str(file_dict))
         for samp, fn_or_dir in file_dict.items():
-            cnt = Counter()
-            for fn in fn_or_dir:
-                cnt += count_reads_from_file(fn, slicer, seq_len, seq_offset)
-            out_files.append(
+            outfn = get_outfn(samp)
+            out_files.append(outfn)
+            if not file_exists_or_zero(outfn):
+                cnt = Counter()
+                for fn in fn_or_dir:
+                    cnt += count_reads_from_file(fn, slicer, seq_len, seq_offset)
                 write_count(cnt, samp)
-            )
+            else:
+                LOG.info('Output counts file already exists. Skipping: ' + outfn)
     else:
         LOG.debug(str(file_list))
         for fn in file_list:
-            cnt = count_reads_from_file(fn, slicer, seq_len, seq_offset, file_type)
-            out_files.append(
-                write_count(cnt, fn.split(fn_split)[0].split('/')[-1])
-            )
+            samp = fn.split(fn_split)[0].split('/')[-1]
+            outfn = get_outfn(samp)
+            out_files.append(outfn)
+            if not file_exists_or_zero(outfn):
+                cnt = count_reads_from_file(fn, slicer, seq_len, seq_offset, file_type)
+                out_files.append(
+                    write_count(cnt, samp)
+                )
+            else:
+                LOG.info('Output counts file already exists. Skipping: ' + outfn)
 
     return out_files
 
