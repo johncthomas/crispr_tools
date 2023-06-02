@@ -11,7 +11,7 @@ CRISPR screen analysis using crispr_tools proceeds by the following steps:
 3. Run the analysis in batch.
 
 # Tutorial
-A tutorial dataset is provided in the `tut` directory. To verify that you have correctly run the analysis, your directory should resemble `tut_ran`. Follow the steps below for a detailed explanation of the analysis.
+A tutorial dataset is provided in the `tut` directory. To verify that you have correctly run the analysis, your directory should resemble `tut/ran`. Follow the steps below for a detailed explanation of the analysis.
 
 ## Reading counts
 The `count_reads.py` script handles read counting from pre-aligned FASTQ files and mapping to a reference library, if supplied.
@@ -33,7 +33,7 @@ Running the `count_reads.py` script generates in the `OUTDIR` raw counts per pro
 ## Design matrix
 Populate the Excel workbook with experimental details pertaining to the run.
 
-In the “Experimental details” sheet, you must supply the analysis version and file prefix. Results will be saved at `file_prefix`/`analysis_version/`. All other fields are for your own convenience should you need to look at this analysis again in the future.
+In the “Experimental details” sheet, you must supply the analysis version and file prefix. Results will be saved at `file_prefix/analysis_version/`. All other fields are for your own convenience should you need to look at this analysis again in the future.
 
 In the “Sample details” sheet, ensure that entries in the “Replicate” column correspond to column names in the counts file. Biological replicates should be given the same value in the “Sample” column. All other columns are optional but are here for your convenience.
 
@@ -46,5 +46,7 @@ This step is the last step and uses `crispr_pipeline.py`.
 
 `crispr_pipeline.py DET`
 
-Specify as a positional argument the experimental details Excel workbook. You will find in `file_prefix`/`analysis_version` the standard results files from a DrugZ and/or MAGeCK analysis, depending on your selection.
+Specify as a positional argument the experimental details Excel workbook. You will find in `file_prefix/analysis_version` the standard results files from a DrugZ and/or MAGeCK analysis, depending on your selection.
 
+## License
+crispr_tools is open-source software and is licensed under a Creative Commons Zero v1.0 Universal license.
