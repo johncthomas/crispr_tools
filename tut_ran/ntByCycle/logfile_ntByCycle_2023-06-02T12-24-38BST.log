@@ -1,9 +1,0 @@
-INFO [2023-06-02 12:24:38] Welcome to ntByCycle, version 0.1.0.
-INFO [2023-06-02 12:24:38] Accepted --file as a file: fastq/Givpir_3.fastq.gz.
-INFO [2023-06-02 12:24:38] Found these fastq files:
-fastq/Givpir_3.fastq.gz
-INFO [2023-06-02 12:24:38] Reading file 1 of 1: fastq/Givpir_3.fastq.gz...
-INFO [2023-06-02 12:24:56] Determining nucleotide frequencies...
-INFO [2023-06-02 12:25:26] Plotting...
-INFO [2023-06-02 12:25:26] Exported static plot to ntByCycle//Givpir_3.fastq.gz.pdf.
-INFO [2023-06-02 12:25:26] crispieR-cts process completed in 48.297 seconds.
