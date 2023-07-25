@@ -33,7 +33,9 @@ and that the sequence to be mapped is in the same position in every read
 Produces dereplicated sequence counts (one file per sample) and then a single
 file containing reads mapped to guide/gene from a library file."""
 
-__version__ = '1.8.2'
+__version__ = '1.8.3'
+# 1.8.3 enabled custom library headers, pass using -j -n -g flags, defaults to
+#       old behaviour (-j guide -n gene -g seq) if not provided
 # 1.8.2 added checkpointing. If rawcounts file(s) already exist, then they won't
 #       be re-generated. Does not check actual contents of existing files.
 # 1.8.1 bugfix in merge samples. Won't work with runs that have more than 9 lanes
@@ -371,6 +373,7 @@ def get_count_table_from_file_list(file_list:List[Path], splitter='.raw',
         fn = Path(fn)
         # filtering of fn done before here
         sn = fn.name.split(splitter)[0]
+        print(sn)
         if remove_prefix:
             sn = sn.split('.')[1]
         #LOG.info(f'sample header: {sn}')
@@ -547,6 +550,12 @@ if __name__ == '__main__':
     parser.add_argument('--library', default=None, metavar='LIB_PATH',
                         help="Pass a library file and a single mapped reads count file will be output with" \
                              "the name [FN_PREFIX].counts.tsv")
+    parser.add_argument('-g', '--seqhdr', default='seq',
+                        help="Name  of column in the library file that contains sequences.")
+    parser.add_argument('-j', '--guidehdr', default='guide',
+                        help="Name  of column in the library file that contains sequences.")
+    parser.add_argument('-n', '--genehdr', default='gene',
+                        help="Name  of column in the library file that contains sequences.")
     parser.add_argument('--allow-mismatch', action='store_true', default=False,
                         help='Allow one mismatch when mapping reads to library.')
     parser.add_argument('--file_type', metavar='FILE_TYPE', choices={'a', 'q', 'infer'}, default='infer',
@@ -582,5 +591,6 @@ if __name__ == '__main__':
     if clargs.library:
         map_counts(written_fn, clargs.library, report=True, remove_prefix=True,
                 out_fn=clargs.prefix+'.counts.tsv', splitter=clargs.suffix,
-                allow_mismatch=clargs.allow_mismatch)
+                allow_mismatch=clargs.allow_mismatch, seqhdr=clargs.seqhdr,
+                guidehdr=clargs.guidehdr, genehdr=clargs.genehdr)
 
