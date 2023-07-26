@@ -33,7 +33,8 @@ and that the sequence to be mapped is in the same position in every read
 Produces dereplicated sequence counts (one file per sample) and then a single
 file containing reads mapped to guide/gene from a library file."""
 
-__version__ = '1.8.3'
+__version__ = '1.8.4'
+# 1.8.4 create directory from prefix if not exist
 # 1.8.3 enabled custom library headers, pass using -j -n -g flags, defaults to
 #       old behaviour (-j guide -n gene -g seq) if not provided
 # 1.8.2 added checkpointing. If rawcounts file(s) already exist, then they won't
@@ -373,7 +374,6 @@ def get_count_table_from_file_list(file_list:List[Path], splitter='.raw',
         fn = Path(fn)
         # filtering of fn done before here
         sn = fn.name.split(splitter)[0]
-        print(sn)
         if remove_prefix:
             sn = sn.split('.')[1]
         #LOG.info(f'sample header: {sn}')
@@ -519,12 +519,6 @@ def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
         cnt.to_csv(out_fn, sep='\t')
     return cnt
 
-# os.chdir('/Users/johnc.thomas/thecluster/jct61/counts/nomask')
-# map_counts(
-#     'tst', '/Users/johnc.thomas/thecluster/jct61/crispr_libraries/Kinase_gRNA_library_no_duplicates.csv',
-#     drop_unmatched=True, report=True, out_fn='tst/tstout2.tsv'
-#
-# )
 
 if __name__ == '__main__':
     print('count_reads.py version', __version__)
@@ -576,6 +570,8 @@ if __name__ == '__main__':
 
     # slices list of input files, or dir
     slicer = [int(n) for n in clargs.slice.split(',')]
+    
+    os.makedirs(os.path.dirname(clargs.prefix))
 
     written_fn = count_batch(fn_or_dir=clargs.files,
                              slicer=slicer,
