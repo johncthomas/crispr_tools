@@ -33,8 +33,9 @@ and that the sequence to be mapped is in the same position in every read
 Produces dereplicated sequence counts (one file per sample) and then a single
 file containing reads mapped to guide/gene from a library file."""
 
-__version__ = '1.8.5'
-# 1.8.4 don't error if directory exists
+__version__ = '1.8.5.1'
+# 1.8.5.1 better way to not error if directory exists
+# 1.8.5 don't error if directory exists
 # 1.8.4 create directory from prefix if not exist
 # 1.8.3 enabled custom library headers, pass using -j -n -g flags, defaults to
 #       old behaviour (-j guide -n gene -g seq) if not provided
@@ -572,10 +573,7 @@ if __name__ == '__main__':
     # slices list of input files, or dir
     slicer = [int(n) for n in clargs.slice.split(',')]
     
-    try:
-        os.makedirs(os.path.dirname(clargs.prefix))
-    except OSError:
-        pass
+    os.makedirs(os.path.dirname(clargs.prefix), exist_ok=True)
 
     written_fn = count_batch(fn_or_dir=clargs.files,
                              slicer=slicer,
