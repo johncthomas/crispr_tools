@@ -33,8 +33,7 @@ and that the sequence to be mapped is in the same position in every read
 Produces dereplicated sequence counts (one file per sample) and then a single
 file containing reads mapped to guide/gene from a library file."""
 
-__version__ = '1.8.6'
-# 1.8.6 drop duplicate rows in mapped counts file when they exist in the library file
+__version__ = '1.8.5.1'
 # 1.8.5.1 better way to not error if directory exists
 # 1.8.5 don't error if directory exists
 # 1.8.4 create directory from prefix if not exist
@@ -479,7 +478,7 @@ def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
     rawcnt = get_count_table_from_file_list(file_list, splitter, remove_prefix)
 
     # map the matching counts
-    cnt = rawcnt.reindex(lib[seqhdr], fill_value=0).drop_duplicates()
+    cnt = rawcnt.reindex(lib[seqhdr], fill_value=0)
 
     if allow_mismatch:
         # get unmapped sequences
