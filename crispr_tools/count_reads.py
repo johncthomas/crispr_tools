@@ -33,7 +33,8 @@ and that the sequence to be mapped is in the same position in every read
 Produces dereplicated sequence counts (one file per sample) and then a single
 file containing reads mapped to guide/gene from a library file."""
 
-__version__ = '1.8.5.1'
+__version__ = '1.9'
+# 1.9   fixed edge case when the guide id column in the library contains duplicated values
 # 1.8.5.1 better way to not error if directory exists
 # 1.8.5 don't error if directory exists
 # 1.8.4 create directory from prefix if not exist
@@ -516,6 +517,7 @@ def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
 
     # Add gene column, guide
     cnt.insert(0, 'gene', lib.set_index(guidehdr)[genehdr])
+    cnt = cnt.drop_duplicates()
 
     if out_fn:
         cnt.to_csv(out_fn, sep='\t')
