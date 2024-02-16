@@ -4,7 +4,7 @@ import numpy as np
 from typing import Union, List, Dict
 import yaml
 from crispr_tools.tools import tabulate_mageck, tabulate_drugz, size_factor_normalise
-from attrdict import AttrDict
+from attrdictionary import AttrDict
 import os
 from crispr_tools.crispr_pipeline import process_control_map
 from crispr_tools.tools import clonal_lfcs

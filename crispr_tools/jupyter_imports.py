@@ -6,7 +6,7 @@ from typing import Dict, List, Union, Tuple
 import typing
 import itertools
 from itertools import combinations, combinations_with_replacement
-import attrdict
+import attrdictionary
 import collections
 
 import pandas as pd

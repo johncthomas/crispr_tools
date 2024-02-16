@@ -9,7 +9,7 @@ from pathlib import Path
 from itertools import combinations
 
 
-from attrdict import AttrDict
+from attrdictionary import AttrDict
 
 import pandas as pd
 #import matplotlib.pyplot as plt

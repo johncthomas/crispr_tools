@@ -9,7 +9,7 @@ PathType = Union[str, bytes, os.PathLike]
 from pathlib import Path, PosixPath, WindowsPath
 import pandas as pd
 from itertools import zip_longest
-from attrdict import AttrDict
+from attrdictionary import AttrDict
 
 import statsmodels.api as sm
 OLS = sm.regression.linear_model.OLS
