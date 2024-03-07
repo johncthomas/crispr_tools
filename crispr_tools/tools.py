@@ -231,26 +231,30 @@ def ROC_values(values:pd.Series, things_oi:pd.Series):
 
 revcomp = lambda s: ''.join([dict(zip('ACTGN', 'TGACN'))[nt] for nt in s[::-1]])
 
-def iter_files_by_prefix(prefix:Union[str, Path], req_suffix=None):
+def iter_files_by_prefix(prefix:Union[str, Path], req_suffix=None, allow_gz=True):
     prefix = Path(prefix)
-    check_suffix = lambda s: s.endswith(req_suffix) if req_suffix is not None else True
+    if req_suffix is not None:
+        if allow_gz:
+            check_suffix = lambda s: (s.endswith(req_suffix) or s.endswith(req_suffix+'.gz'))
+        else:
+            check_suffix = lambda s: s.endswith(req_suffix)
+    else:
+        check_suffix = lambda s: True
 
     for fn in os.listdir(prefix.parent):
-        # filter incorrect files, the '._' are mac files that are not
-        # ignored automatically on unix filesystem
-        if not (
-            check_suffix(fn) or
-            (prefix.parts[-1] not in fn) or
-            fn.startswith('._')
+        if (
+            check_suffix(fn)  and
+            (prefix.parts[-1] in fn) and
+            (not fn.startswith('._')) # mac files not ignored by unix
         ):
-            continue
-        yield fn
+            yield fn
 
-def tabulate_mageck(prefix, compjoiner=ARROW):
-    """
-    :param prefix: Input file prefix, including path
-    :return: pd.DataFrame
-    """
+def tabulate_mageck(prefix, compjoiner=ARROW) -> dict[str, pd.DataFrame]:
+    """One DF per comparison.
+
+    Args:
+        prefix: full path including the string added to output files.
+        compjoiner: symbol used to join comparisons, that forms part of the filename."""
     prefix = Path(prefix)
     tables = {}
     tab = None
@@ -296,7 +300,13 @@ def tabulate_mageck(prefix, compjoiner=ARROW):
 
     return table
 
-def tabulate_drugz(prefix, compjoiner=ARROW):
+def tabulate_drugz(prefix, compjoiner=ARROW) -> dict[str, pd.DataFrame]:
+    """One DF per comparison.
+
+    Args:
+        prefix: full path including the string added to output files.
+        compjoiner: symbol used to join comparisons, that forms part of the filename.
+            Will be replaced by hyphen. If it's already hyphen it doesn't matter."""
     prefix=Path(prefix)
     tables = {}
     for fn in iter_files_by_prefix(prefix):

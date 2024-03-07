@@ -25,7 +25,7 @@ setup(
     install_requires = [
         'numpy', 'scipy', 'pandas',
         'statsmodels', 'attrdictionary', 'xlsxwriter', 'openpyxl',
-        'scikit-learn',
+        'scikit-learn', 'pyaml'
     ],
     extras_require={
         'plotting':['matplotlib', 'adjustText', 'seaborn'],

@@ -49,7 +49,7 @@ class AnalysisWorkbook:
 
     additional_options overwrites anything in the Excel file"""
 
-    def __init__(self, xlfn, parse_workbook=True, counts_dir='.'):
+    def __init__(self, xlfn, parse_workbook=True, counts_dir='.',):
         """
         Args:
             counts_dir: directory containing counts files specified in the
@@ -57,7 +57,13 @@ class AnalysisWorkbook:
 
         self.safesplit = lambda x: x.replace(' ', '').split(',')
         self.fn = xlfn
-        self.wb = self.load_analysis_workbook(xlfn)
+        self.wb = wb = self.load_analysis_workbook(xlfn)
+        self.experiment_details:pd.DataFrame = wb['Experiment details']
+        self.samples:pd.DataFrame = wb['Sample details']
+        self.replicates:pd.DataFrame = wb['Replicate details']
+        self.control_groups:pd.DataFrame = wb['Control groups']
+        self.analylses = wb['Analyses']
+
         self.counts_dir = counts_dir
         if parse_workbook:
             self.expd = self.workbook_to_dict(counts_dir=counts_dir)
@@ -67,16 +73,13 @@ class AnalysisWorkbook:
             wb = self.wb
 
         errors = []
-        samp_deets = wb['Sample details']
-        controls = wb['Control groups']
-        analyses = wb['Analyses']
 
-        if samp_deets.index.duplicated().any():
+        if self.samples.index.duplicated().any():
             errors.append('Duplicated replicate names in Sample details')
 
         for s in 'Control', 'Test':
-            smps = controls[f'{s} sample']
-            found = smps.isin(samp_deets.Sample)
+            smps = self.control_groups[f'{s} sample']
+            found = smps.isin(self.samples.Sample)
             if (~found).any():
                 errors.append(
                     f"Non-existent samples specified in {s} column of Control Groups sheet:\n   "
@@ -86,10 +89,10 @@ class AnalysisWorkbook:
         # check group names in Analyses
         missing_grps = set()
         analyses_grps = set()
-        for c in analyses['Control group'].unique():
+        for c in self.analylses['Control group'].unique():
             for g in self.safesplit(c):
                 analyses_grps.add(g)
-                if g not in controls['Group'].unique():
+                if g not in self.control_groups['Group'].unique():
                     missing_grps.add(g)
 
         if len(missing_grps):
@@ -99,7 +102,7 @@ class AnalysisWorkbook:
         # check group names in Controls
         missing_grps = set()
 
-        for c in controls['Group'].unique():
+        for c in self.control_groups['Group'].unique():
             if c not in analyses_grps:
                 missing_grps.add(c)
 
