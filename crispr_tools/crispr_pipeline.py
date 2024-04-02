@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import logging, os, datetime, inspect, argparse
+import gzip
 
 from typing import List, Dict
 from copy import copy
@@ -354,17 +355,22 @@ def call_mageck_batch(sample_reps:Dict[str, list],
     call("which mageck".split())
     pipeLOG.info('Running MAGeCK version ' + check_output(["mageck", "-v"]).decode())
 
+    # Using a temporary file to deal with .gz and add pseudocount if set
+    tmp_fn = prefix+'temp_counts.tsv'
+    counts = pd.read_csv(counts_file, sep='\t', index_col=0)
+
     # Deal with pseudocount. Mageck doesn't have this facility, so we need
     #   to write a temporary counts file.
     # It adds 1 before logging anyway.
-    tmp_fn = None
-    if pseudocount > 1:
-        counts = pd.read_csv(counts_file, sep='\t', index_col=0)
+    if (pseudocount > 1):
         num_cols = counts.dtypes != object
         counts.loc[:, num_cols] += pseudocount
         tmp_fn = prefix+'temp_counts.tsv'
         counts.to_csv(tmp_fn, sep='\t')
         counts_file = tmp_fn
+
+    counts.to_csv(tmp_fn, sep='\t')
+    counts_file = tmp_fn
 
     for ctrl_samp, treat_samples in control_map.items():
         
@@ -589,7 +595,11 @@ def process_arguments(arguments:dict, delete_unrequired_args=True) -> dict:
         raise PipelineOptionsError('No counts file set for analysis')
 
     for cfn in counts_files:
-        with open(cfn) as f:
+        if cfn.endswith('.gz'):
+            open_count_file = lambda fn: gzip.open(fn, 'rt')
+        else:
+            open_count_file = open
+        with open_count_file(cfn) as f:
             line = next(f)
             if not '\t' in line:
                 raise PipelineOptionsError(
