@@ -863,11 +863,11 @@ def parse_args() -> dict:
                         help='Path to counts file, or directory containing counts file(s)'
                              ' specified in config_file',
                         required=True, dest='counts_file')
-    parser.add_argument('--output-dir', metavar='PATH', required=True,
+    parser.add_argument('--output-dir', metavar='PATH', default='./',
                         help=('Path to where results directory will be created if not current'
                               ' directory. Experiment_id and analysis_version will determine results dir.') )
     parser.add_argument('--file-prefix', default='result',
-                        help="String to form identifying prefix for all files generated.")
+                        help="String prepended to names of all files generated.")
     parser.add_argument('--skip-method', metavar='list,of,progs', default=None,
                         help='Filter analyses methods to be run.')
     parser.add_argument('--run-groups', metavar='list,of,groups', default=None,
@@ -878,7 +878,7 @@ def parse_args() -> dict:
     parser.add_argument('--dont-log', action='store_true', dest='dont_log', default=None,
                         help="Don't write a log file.")
     parser.add_argument('--analysis-version', default=None,
-                        help='Output files will be stored in a directory of the above name, within the experiment dir.')
+                        help='Optional. Output files will be stored in [output-dir]/[analysis-version] if set.')
     parser.add_argument('--dry-run', action='store_true', default=False,
                         help='Tries to validate all the options specified without actually running anything. ' 
                              'Not guaranteed to spot all issues.')
