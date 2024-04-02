@@ -365,9 +365,6 @@ def call_mageck_batch(sample_reps:Dict[str, list],
     if (pseudocount > 1):
         num_cols = counts.dtypes != object
         counts.loc[:, num_cols] += pseudocount
-        tmp_fn = prefix+'temp_counts.tsv'
-        counts.to_csv(tmp_fn, sep='\t')
-        counts_file = tmp_fn
 
     counts.to_csv(tmp_fn, sep='\t')
     counts_file = tmp_fn
