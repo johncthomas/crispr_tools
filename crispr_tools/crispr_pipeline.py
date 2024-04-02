@@ -229,7 +229,6 @@ def call_drugZ_batch(sample_reps:Dict[str, list],
     kwargs = kwargs
     if kwargs is None:
         kwargs = {}
-    #todo remove attrdict usage
     dzargs = AttrDict()
     dzargs.infile = counts_file
     # defaults
@@ -844,12 +843,12 @@ def load_configuration_file(config_filename, counts_dir='.') -> dict:
 
     return config_file_args
 
-if __name__ == '__main__':
 
+def parse_args() -> dict:
     pipeLOG.info(str(__version__))
     parser = argparse.ArgumentParser(
-        description="Run mageck and jacks analyses using a JSON file.\n "
-                    "Use arguments below to override JSON options"
+        description="Run crispr pipeline using experiment description in an XLSX or JSON file."
+
     )
 
     parser.add_argument(
@@ -861,8 +860,8 @@ if __name__ == '__main__':
     parser.add_argument('--counts', metavar='FILE/DIR',
                         help='Path to counts file, or directory containing counts file(s)'
                              ' specified in config_file',
-                        default=None, dest='counts_file')
-    parser.add_argument('--output-dir', metavar='PATH', default='.',
+                        required=True, dest='counts_file')
+    parser.add_argument('--output-dir', metavar='PATH', required=True,
                         help=('Path to where results directory will be created if not current'
                               ' directory. Experiment_id and analysis_version will determine results dir.') )
     parser.add_argument('--file-prefix', default='result',
@@ -872,8 +871,8 @@ if __name__ == '__main__':
     parser.add_argument('--run-groups', metavar='list,of,groups', default=None,
                         help='Specify control groups (as defined in exp dict) to be included. All included by default.')
     parser.add_argument('--run-analyses', metavar='list,of,names', default=None,
-                        help='Specify analyses by name to run. Names defined on Analyses sheet or {"name":name} in'
-                             ' analyses dictionaries. All included by default.')
+                        help='Specify analyses by name to run. Names defined on Analyses sheet or {"name":NAME} in'
+                             ' JSON. All included by default.')
     parser.add_argument('--dont-log', action='store_true', dest='dont_log', default=None,
                         help="Don't write a log file.")
     parser.add_argument('--analysis-version', default=None,
@@ -914,6 +913,9 @@ if __name__ == '__main__':
 
     # validate and process arguments
     args = process_arguments(config_file_args)
+    print('args = ', args)
+    return args
 
-    run_analyses(**args)
+if __name__ == '__main__':
+    run_analyses(**parse_args())
 
