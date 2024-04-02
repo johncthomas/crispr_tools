@@ -773,6 +773,8 @@ def run_analyses(output_dir, file_prefix,
         except KeyError:
             curr_kwargs = default_method_kwargs
 
+        pseudocount = analysis_dict.get('pseudo_count', 1)
+
         # go through the selected groups for this analysis and run the thing
         for grp in groups:
 
@@ -798,7 +800,7 @@ def run_analyses(output_dir, file_prefix,
                 (analysis_method, out_prefix, f"{file_prefix}{labstr}")
             )
             analysis_func = analysis_functions[analysis_method]
-            analysis_func(sample_reps, ctrl_map, curr_counts, out_prefix, curr_kwargs, )
+            analysis_func(sample_reps, ctrl_map, curr_counts, out_prefix, curr_kwargs, pseudocount=pseudocount)
 
         # tabulate the analyses
         for analysis_method, results_prefix, table_file_prefix in list(ran_analyses):
