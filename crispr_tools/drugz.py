@@ -35,7 +35,6 @@
 # python modules
 # ------------------------------------
 import sys
-import six
 
 import numpy as np
 import pandas as pd
@@ -166,9 +165,16 @@ def empirical_bayes(fold_change, half_window_size, no_of_guides, fc_replicate_id
     :return: fold_change: Updated instance of the input dataframe
     """
 
+
+    fold_change: pd.DataFrame
+
+    # use a numeric index for this function so we can do assignments in one operation
+    fold_change.index.name = 'GUIDE'
+    fold_change = fold_change.reset_index(drop=False)
+
     # Calculate the standard deviation of foldchange based on a 2 * define window size range
-    std_dev = fold_change.iloc[0: half_window_size * 2][fc_replicate_id].std()
-    fold_change[empirical_bayes_id][0: half_window_size] = std_dev
+    std_dev = fold_change.loc[0: half_window_size * 2, fc_replicate_id].std()
+    fold_change.loc[0:half_window_size, empirical_bayes_id] = std_dev
 
     # Iterate in a range(half_window_size, n-half_window_size, 25) where and n is the number of guides
     for i in range(half_window_size, no_of_guides - half_window_size + 25, 25):
@@ -176,22 +182,24 @@ def empirical_bayes(fold_change, half_window_size, no_of_guides, fc_replicate_id
         std_dev = fold_change.iloc[i - half_window_size:i + half_window_size][fc_replicate_id].std()
 
         # If the current variation is greater than the one for previous bin then set variation equal to this
-        if std_dev >= fold_change[empirical_bayes_id][i - 1]:
-            fold_change[empirical_bayes_id][i:i + 25] = std_dev  # set new std in whole step size (25)
+        if std_dev >= fold_change[empirical_bayes_id].iloc[i - 1]:
+            fold_change.loc[i:i + 25, empirical_bayes_id] = std_dev  # set new std in whole step size (25)
         # Otherwise, set it equal to the variation of the previous bin
         # This allows variation estimate for each bin to only increase or stay the same as the previous
         else:
-            fold_change[empirical_bayes_id][i:i + 25] = fold_change.iloc[i - 1][empirical_bayes_id]
+            fold_change.loc[i:i + 25, empirical_bayes_id] = fold_change.iloc[i - 1][empirical_bayes_id]
 
     # Get the variation estimate for the final bin and set the remaining values in the empirical bayes column
     # equal to this estimate
     if no_of_guides <= half_window_size:
-        raise RuntimeError('Not enough guides to estimate variation: lower half_window_size')
+        raise RuntimeError('Not enough guides to estimate variation: use lower half_window_size')
     results = fold_change.iloc[no_of_guides - (half_window_size + 1)][empirical_bayes_id]
-    fold_change[empirical_bayes_id][no_of_guides - half_window_size:] = results
+    fold_change.loc[no_of_guides - half_window_size:, empirical_bayes_id] = results
 
     # Calculate the z_score for each guide (fc/eb_std)
     fold_change[fc_zscore_id] = fold_change[fc_replicate_id] / fold_change[empirical_bayes_id]
+
+    fold_change.set_index('GUIDE', inplace=True, drop=True)
 
     return fold_change, fc_zscore_id
 

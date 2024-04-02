@@ -268,31 +268,29 @@ def call_drugZ_batch(sample_reps:Dict[str, list],
 
             dzargs.drugz_output_file = f"{prefix}.{ctrl_samp}-{treat_samp}.tsv".replace('//', '/')
             
-            if not file_exists_or_zero(dzargs.drugz_output_file):
+            if file_exists_or_zero(dzargs.drugz_output_file):
+                os.remove(dzargs.drugz_output_file)
 
-                if drop_guide_less_than:
-                    reps = list_not_str(sample_reps[ctrl_samp]) \
-                           + list_not_str(sample_reps[treat_samp])
-    
-                    cnt_lessthan = (cnt.loc[:, reps] < drop_guide_less_than)
-                    # if add more types here, add new keywords to assertion at top of func
-                    if drop_guide_type == 'any':
-                        bad_guides = cnt_lessthan.any(1)
-                    #elif drop_guide_type in ('both', 'all'):
-                    else:
-                         bad_guides = cnt_lessthan.all(1)
-    
-                    cnt.loc[~bad_guides, ['gene']+reps].to_csv(tmpfn, sep='\t')
-                    pipeLOG.info(
-                        f"call_drugZ_batch: {sum(bad_guides)} guides removed "
-                        f"from {ctrl_samp}-{treat_samp}, using less than {drop_guide_less_than} "
-                        f"with '{drop_guide_type}' method."
-                    )
-    
-                drugZ_analysis(dzargs)
-            
-            else:
-                pipeLOG.info('Output DrugZ analysis exists: ' + dzargs.drugz_output_file + ". Not running DrugZ.")
+            if drop_guide_less_than:
+                reps = list_not_str(sample_reps[ctrl_samp]) \
+                       + list_not_str(sample_reps[treat_samp])
+
+                cnt_lessthan = (cnt.loc[:, reps] < drop_guide_less_than)
+                # if add more types here, add new keywords to assertion at top of func
+                if drop_guide_type == 'any':
+                    bad_guides = cnt_lessthan.any(1)
+                #elif drop_guide_type in ('both', 'all'):
+                else:
+                     bad_guides = cnt_lessthan.all(1)
+
+                cnt.loc[~bad_guides, ['gene']+reps].to_csv(tmpfn, sep='\t')
+                pipeLOG.info(
+                    f"call_drugZ_batch: {sum(bad_guides)} guides removed "
+                    f"from {ctrl_samp}-{treat_samp}, using less than {drop_guide_less_than} "
+                    f"with '{drop_guide_type}' method."
+                )
+
+            drugZ_analysis(dzargs)
 
     if drop_guide_less_than:
         os.remove(tmpfn)
