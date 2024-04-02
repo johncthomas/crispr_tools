@@ -568,23 +568,21 @@ def process_arguments(arguments:dict, delete_unrequired_args=True) -> dict:
 
     # get list of all counts files used
     counts_files = set()
-    counts_not_top_level = False
-    try:
-        # this top level not required
+    if (('counts_file' in arguments)
+        and (arguments['counts_file'] is not None)
+        and (os.path.isfile(arguments['counts_file']))
+    ):
         counts_files.add(arguments['counts_file'])
-    except KeyError:
-        counts_not_top_level = True
-
-    # add analysis specific counts files, also check method exists
-    for ans in arguments['analyses']:
-        if 'counts_file' in ans:
-            counts_files.add(ans['counts_file'])
-        else:
-            if counts_not_top_level:
+    else:
+        # add analysis specific counts files, also check method exists
+        for ans in arguments['analyses']:
+            if 'counts_file' in ans:
+                counts_files.add(ans['counts_file'])
+            else:
                 raise PipelineOptionsError('No counts file set for analysis')
-        method = ans['method']
-        if method not in available_analyses:
-            raise PipelineOptionsError(f'Unknown method: "{method}" specified.')
+            method = ans['method']
+            if method not in available_analyses:
+                raise PipelineOptionsError(f'Unknown method: "{method}" specified.')
 
 
     # Check a counts file has been specified
@@ -782,10 +780,10 @@ def run_analyses(output_dir, file_prefix,
             labstr = ''
 
             ctrl_map = control_groups[grp]
-            try:
-                curr_counts = analysis_dict['counts_file']
-            except KeyError:
+            if counts_file:
                 curr_counts = counts_file
+            else:
+                curr_counts = analysis_dict['counts_file']
 
             pipeLOG.info(
                 f"Running batch {analysis_method}\n\tgroup: {grp}\n\twith options: {analysis_dict}\n"
