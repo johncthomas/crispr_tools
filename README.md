@@ -11,7 +11,7 @@ CRISPR screen analysis using crispr_tools proceeds by the following steps:
 3. Run the analysis in batch.
 
 # Tutorial
-A tutorial dataset is provided in the `tut` directory. To verify that you have correctly run the analysis, your directory should resemble `tut/ran`. Follow the steps below for a detailed explanation of the analysis.
+A tutorial is provided in the `doc` directory.
 
 ## Reading counts
 The `count_reads.py` script handles read counting from pre-aligned FASTQ files and mapping to a reference library, if supplied.
