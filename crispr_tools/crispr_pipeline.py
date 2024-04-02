@@ -466,7 +466,7 @@ def validate_required_arguments(arguments:dict):
     If validation fails, raise a RuntimeError"""
 
     # check the required top level options are all present
-    required_options = ['sample_reps', 'experiment_id', 'analysis_version',
+    required_options = ['sample_reps', 'experiment_id',
                          'analyses', 'file_prefix',]
 
     analyses = arguments['analyses']
@@ -551,9 +551,10 @@ def process_arguments(arguments:dict, delete_unrequired_args=True) -> dict:
     arguments['control_groups'] = controls
 
     # generate output_dir from exp_id and analysis_version
+    analysis_version = arguments.get("analysis_version", '')
     arguments["output_dir"] = os.path.join(arguments['output_dir'],
                                            arguments["experiment_id"],
-                                           arguments["analysis_version"])
+                                           analysis_version)
 
     pipeLOG.info(f'output_dir = {arguments["output_dir"]}')
 
