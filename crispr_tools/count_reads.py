@@ -570,6 +570,10 @@ if __name__ == '__main__':
         if not os.path.isfile(clargs.library):
             raise RuntimeError(f"Library file not found: {clargs.library}")
 
+        lib = pd.read_csv(clargs.library, index_col=clargs.guidehdr)
+        if lib.index.duplicated().any():
+            print('WARNING: Duplicated guide names found in library, first one will be kept, all others discarded.')
+
     assert all([os.path.isfile(f) for f in clargs.files])
 
     # slices list of input files, or dir
