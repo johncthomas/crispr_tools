@@ -15,6 +15,7 @@ from attrdictionary import AttrDict
 import pandas as pd
 #import matplotlib.pyplot as plt
 from crispr_tools import data_classes
+from crispr_tools.tools import maybe_its_gz
 
 ARROW = '→'
 # todo don't write drugz tables until everything is run
@@ -590,6 +591,7 @@ def process_arguments(arguments:dict, delete_unrequired_args=True) -> dict:
         raise PipelineOptionsError('No counts file set for analysis')
 
     for cfn in counts_files:
+        cfn = maybe_its_gz(cfn)
         if cfn.endswith('.gz'):
             open_count_file = lambda fn: gzip.open(fn, 'rt')
         else:
@@ -785,6 +787,8 @@ def run_analyses(output_dir, file_prefix,
                 curr_counts = counts_file
             else:
                 curr_counts = analysis_dict['counts_file']
+
+            curr_counts = maybe_its_gz(curr_counts)
 
             pipeLOG.info(
                 f"Running batch {analysis_method}\n\tgroup: {grp}\n\twith options: {analysis_dict}\n"

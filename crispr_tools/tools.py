@@ -22,6 +22,20 @@ from crispr_tools.data_classes import (
 ARROW = '→'
 #import multiprocessing as mp
 
+def maybe_its_gz(filename) -> str:
+    """If filename doesn't exist, look for filename+'.gz'. If the gz version exists,
+    return that filename, otherwise return the original filename.
+
+    Raises if neither found."""
+    filename = str(filename)
+    if not os.path.isfile(filename):
+        filegz = filename+'.gz'
+        if os.path.isfile(filegz):
+            return filegz
+    else:
+        return filename
+    raise FileNotFoundError(f"Neither {filename} nor {filegz} exists.")
+
 hart_list = ['AARS1', 'ABCE1', 'ABCF1', 'ACTB', 'ACTL6A', 'ACTR10', 'ACTR2',
        'ADSL', 'ADSS2', 'AHCY', 'ALG1', 'ALG14', 'ALG2', 'ANAPC2',
        'ANAPC4', 'ANAPC5', 'AQR', 'ARCN1', 'ARIH1', 'ARL2', 'ATP2A2',

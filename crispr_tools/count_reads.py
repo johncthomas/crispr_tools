@@ -15,6 +15,8 @@ from functools import partial
 # make it easy to find print statements used for debugging
 debugprint = print
 
+from crispr_tools.tools import maybe_its_gz
+
 import logging
 LOG = logging.getLogger(__name__, )
 LOG.setLevel(logging.INFO) # need to set the logger to the lowest level...
@@ -456,10 +458,11 @@ def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
 
     if type(lib) in (str, PosixPath, WindowsPath):
         lib = str(lib)
-        if lib.endswith('.csv'):
+        if lib.endswith('.csv') or lib.endswith('.csv.gz'):
             sep = ','
         else:
             sep = '\t'
+        lib = maybe_its_gz(lib)
         lib = pd.read_csv(lib, sep=sep)
 
     for hdr in (seqhdr, guidehdr, genehdr):
