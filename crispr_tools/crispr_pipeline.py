@@ -379,7 +379,8 @@ def call_mageck_batch(sample_reps:Dict[str, list],
                 continue
             
             outfn = '{outprefix}.{ctrlnm}-{sampnm}.gene_summary.txt'.format(outprefix=prefix, ctrlnm=ctrl_samp, sampnm=treat)
-            if not file_exists_or_zero(outfn):
+            if file_exists_or_zero(outfn):
+                os.remove(outfn)
 
                 call_mageck(ctrl_samp, treat, sample_reps, counts_file, prefix, kwargs)
                 mageck_pairs_done.append((ctrl_samp, treat))
