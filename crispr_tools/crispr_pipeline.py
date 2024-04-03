@@ -382,11 +382,8 @@ def call_mageck_batch(sample_reps:Dict[str, list],
             if file_exists_or_zero(outfn):
                 os.remove(outfn)
 
-                call_mageck(ctrl_samp, treat, sample_reps, counts_file, prefix, kwargs)
-                mageck_pairs_done.append((ctrl_samp, treat))
-                
-            else:
-                pipeLOG.info('Output MAGeCK analysis exists: ' + outfn + ". Not running MAGeCK.")
+            call_mageck(ctrl_samp, treat, sample_reps, counts_file, prefix, kwargs)
+            mageck_pairs_done.append((ctrl_samp, treat))
 
 
     # delete the file with additional pseudocount, if there is one.
