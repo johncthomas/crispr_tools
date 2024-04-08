@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import logging, os, datetime, inspect, argparse
+import gzip
 
 from typing import List, Dict
 from copy import copy
@@ -9,11 +10,12 @@ from pathlib import Path
 from itertools import combinations
 
 
-from attrdict import AttrDict
+from attrdictionary import AttrDict
 
 import pandas as pd
 #import matplotlib.pyplot as plt
 from crispr_tools import data_classes
+from crispr_tools.tools import maybe_its_gz
 
 ARROW = '→'
 # todo don't write drugz tables until everything is run
@@ -228,7 +230,6 @@ def call_drugZ_batch(sample_reps:Dict[str, list],
     kwargs = kwargs
     if kwargs is None:
         kwargs = {}
-    #todo remove attrdict usage
     dzargs = AttrDict()
     dzargs.infile = counts_file
     # defaults
@@ -268,31 +269,29 @@ def call_drugZ_batch(sample_reps:Dict[str, list],
 
             dzargs.drugz_output_file = f"{prefix}.{ctrl_samp}-{treat_samp}.tsv".replace('//', '/')
             
-            if not file_exists_or_zero(dzargs.drugz_output_file):
+            if file_exists_or_zero(dzargs.drugz_output_file):
+                os.remove(dzargs.drugz_output_file)
 
-                if drop_guide_less_than:
-                    reps = list_not_str(sample_reps[ctrl_samp]) \
-                           + list_not_str(sample_reps[treat_samp])
-    
-                    cnt_lessthan = (cnt.loc[:, reps] < drop_guide_less_than)
-                    # if add more types here, add new keywords to assertion at top of func
-                    if drop_guide_type == 'any':
-                        bad_guides = cnt_lessthan.any(1)
-                    #elif drop_guide_type in ('both', 'all'):
-                    else:
-                         bad_guides = cnt_lessthan.all(1)
-    
-                    cnt.loc[~bad_guides, ['gene']+reps].to_csv(tmpfn, sep='\t')
-                    pipeLOG.info(
-                        f"call_drugZ_batch: {sum(bad_guides)} guides removed "
-                        f"from {ctrl_samp}-{treat_samp}, using less than {drop_guide_less_than} "
-                        f"with '{drop_guide_type}' method."
-                    )
-    
-                drugZ_analysis(dzargs)
-            
-            else:
-                pipeLOG.info('Output DrugZ analysis exists: ' + dzargs.drugz_output_file + ". Not running DrugZ.")
+            if drop_guide_less_than:
+                reps = list_not_str(sample_reps[ctrl_samp]) \
+                       + list_not_str(sample_reps[treat_samp])
+
+                cnt_lessthan = (cnt.loc[:, reps] < drop_guide_less_than)
+                # if add more types here, add new keywords to assertion at top of func
+                if drop_guide_type == 'any':
+                    bad_guides = cnt_lessthan.any(1)
+                #elif drop_guide_type in ('both', 'all'):
+                else:
+                     bad_guides = cnt_lessthan.all(1)
+
+                cnt.loc[~bad_guides, ['gene']+reps].to_csv(tmpfn, sep='\t')
+                pipeLOG.info(
+                    f"call_drugZ_batch: {sum(bad_guides)} guides removed "
+                    f"from {ctrl_samp}-{treat_samp}, using less than {drop_guide_less_than} "
+                    f"with '{drop_guide_type}' method."
+                )
+
+            drugZ_analysis(dzargs)
 
     if drop_guide_less_than:
         os.remove(tmpfn)
@@ -356,17 +355,19 @@ def call_mageck_batch(sample_reps:Dict[str, list],
     call("which mageck".split())
     pipeLOG.info('Running MAGeCK version ' + check_output(["mageck", "-v"]).decode())
 
+    # Using a temporary file to deal with .gz and add pseudocount if set
+    tmp_fn = prefix+'temp_counts.tsv'
+    counts = pd.read_csv(counts_file, sep='\t', index_col=0)
+
     # Deal with pseudocount. Mageck doesn't have this facility, so we need
     #   to write a temporary counts file.
     # It adds 1 before logging anyway.
-    tmp_fn = None
-    if pseudocount > 1:
-        counts = pd.read_csv(counts_file, sep='\t', index_col=0)
+    if (pseudocount > 1):
         num_cols = counts.dtypes != object
         counts.loc[:, num_cols] += pseudocount
-        tmp_fn = prefix+'temp_counts.tsv'
-        counts.to_csv(tmp_fn, sep='\t')
-        counts_file = tmp_fn
+
+    counts.to_csv(tmp_fn, sep='\t')
+    counts_file = tmp_fn
 
     for ctrl_samp, treat_samples in control_map.items():
         
@@ -378,13 +379,11 @@ def call_mageck_batch(sample_reps:Dict[str, list],
                 continue
             
             outfn = '{outprefix}.{ctrlnm}-{sampnm}.gene_summary.txt'.format(outprefix=prefix, ctrlnm=ctrl_samp, sampnm=treat)
-            if not file_exists_or_zero(outfn):
+            if file_exists_or_zero(outfn):
+                os.remove(outfn)
 
-                call_mageck(ctrl_samp, treat, sample_reps, counts_file, prefix, kwargs)
-                mageck_pairs_done.append((ctrl_samp, treat))
-                
-            else:
-                pipeLOG.info('Output MAGeCK analysis exists: ' + outfn + ". Not running MAGeCK.")
+            call_mageck(ctrl_samp, treat, sample_reps, counts_file, prefix, kwargs)
+            mageck_pairs_done.append((ctrl_samp, treat))
 
 
     # delete the file with additional pseudocount, if there is one.
@@ -465,7 +464,7 @@ def validate_required_arguments(arguments:dict):
     If validation fails, raise a RuntimeError"""
 
     # check the required top level options are all present
-    required_options = ['sample_reps', 'experiment_id', 'analysis_version',
+    required_options = ['sample_reps', 'experiment_id',
                          'analyses', 'file_prefix',]
 
     analyses = arguments['analyses']
@@ -550,9 +549,10 @@ def process_arguments(arguments:dict, delete_unrequired_args=True) -> dict:
     arguments['control_groups'] = controls
 
     # generate output_dir from exp_id and analysis_version
+    analysis_version = arguments.get("analysis_version", '')
     arguments["output_dir"] = os.path.join(arguments['output_dir'],
                                            arguments["experiment_id"],
-                                           arguments["analysis_version"])
+                                           analysis_version)
 
     pipeLOG.info(f'output_dir = {arguments["output_dir"]}')
 
@@ -566,23 +566,21 @@ def process_arguments(arguments:dict, delete_unrequired_args=True) -> dict:
 
     # get list of all counts files used
     counts_files = set()
-    counts_not_top_level = False
-    try:
-        # this top level not required
+    if (('counts_file' in arguments)
+        and (arguments['counts_file'] is not None)
+        and (os.path.isfile(arguments['counts_file']))
+    ):
         counts_files.add(arguments['counts_file'])
-    except KeyError:
-        counts_not_top_level = True
-
-    # add analysis specific counts files, also check method exists
-    for ans in arguments['analyses']:
-        if 'counts_file' in ans:
-            counts_files.add(ans['counts_file'])
-        else:
-            if counts_not_top_level:
+    else:
+        # add analysis specific counts files, also check method exists
+        for ans in arguments['analyses']:
+            if 'counts_file' in ans:
+                counts_files.add(ans['counts_file'])
+            else:
                 raise PipelineOptionsError('No counts file set for analysis')
-        method = ans['method']
-        if method not in available_analyses:
-            raise PipelineOptionsError(f'Unknown method: "{method}" specified.')
+            method = ans['method']
+            if method not in available_analyses:
+                raise PipelineOptionsError(f'Unknown method: "{method}" specified.')
 
 
     # Check a counts file has been specified
@@ -591,7 +589,12 @@ def process_arguments(arguments:dict, delete_unrequired_args=True) -> dict:
         raise PipelineOptionsError('No counts file set for analysis')
 
     for cfn in counts_files:
-        with open(cfn) as f:
+        cfn = maybe_its_gz(cfn)
+        if cfn.endswith('.gz'):
+            open_count_file = lambda fn: gzip.open(fn, 'rt')
+        else:
+            open_count_file = open
+        with open_count_file(cfn) as f:
             line = next(f)
             if not '\t' in line:
                 raise PipelineOptionsError(
@@ -770,16 +773,20 @@ def run_analyses(output_dir, file_prefix,
         except KeyError:
             curr_kwargs = default_method_kwargs
 
+        pseudocount = analysis_dict.get('pseudo_count', 1)
+
         # go through the selected groups for this analysis and run the thing
         for grp in groups:
 
             labstr = ''
 
             ctrl_map = control_groups[grp]
-            try:
-                curr_counts = analysis_dict['counts_file']
-            except KeyError:
+            if counts_file:
                 curr_counts = counts_file
+            else:
+                curr_counts = analysis_dict['counts_file']
+
+            curr_counts = maybe_its_gz(curr_counts)
 
             pipeLOG.info(
                 f"Running batch {analysis_method}\n\tgroup: {grp}\n\twith options: {analysis_dict}\n"
@@ -795,7 +802,7 @@ def run_analyses(output_dir, file_prefix,
                 (analysis_method, out_prefix, f"{file_prefix}{labstr}")
             )
             analysis_func = analysis_functions[analysis_method]
-            analysis_func(sample_reps, ctrl_map, curr_counts, out_prefix, curr_kwargs, )
+            analysis_func(sample_reps, ctrl_map, curr_counts, out_prefix, curr_kwargs, pseudocount=pseudocount)
 
         # tabulate the analyses
         for analysis_method, results_prefix, table_file_prefix in list(ran_analyses):
@@ -840,12 +847,12 @@ def load_configuration_file(config_filename, counts_dir='.') -> dict:
 
     return config_file_args
 
-if __name__ == '__main__':
 
+def parse_args() -> dict:
     pipeLOG.info(str(__version__))
     parser = argparse.ArgumentParser(
-        description="Run mageck and jacks analyses using a JSON file.\n "
-                    "Use arguments below to override JSON options"
+        description="Run crispr pipeline using experiment description in an XLSX or JSON file."
+
     )
 
     parser.add_argument(
@@ -857,23 +864,23 @@ if __name__ == '__main__':
     parser.add_argument('--counts', metavar='FILE/DIR',
                         help='Path to counts file, or directory containing counts file(s)'
                              ' specified in config_file',
-                        default=None, dest='counts_file')
-    parser.add_argument('--output-dir', metavar='PATH', default='.',
+                        required=True, dest='counts_file')
+    parser.add_argument('--output-dir', metavar='PATH', default='./',
                         help=('Path to where results directory will be created if not current'
                               ' directory. Experiment_id and analysis_version will determine results dir.') )
     parser.add_argument('--file-prefix', default='result',
-                        help="String to form identifying prefix for all files generated.")
+                        help="String prepended to names of all files generated.")
     parser.add_argument('--skip-method', metavar='list,of,progs', default=None,
                         help='Filter analyses methods to be run.')
     parser.add_argument('--run-groups', metavar='list,of,groups', default=None,
                         help='Specify control groups (as defined in exp dict) to be included. All included by default.')
     parser.add_argument('--run-analyses', metavar='list,of,names', default=None,
-                        help='Specify analyses by name to run. Names defined on Analyses sheet or {"name":name} in'
-                             ' analyses dictionaries. All included by default.')
+                        help='Specify analyses by name to run. Names defined on Analyses sheet or {"name":NAME} in'
+                             ' JSON. All included by default.')
     parser.add_argument('--dont-log', action='store_true', dest='dont_log', default=None,
                         help="Don't write a log file.")
     parser.add_argument('--analysis-version', default=None,
-                        help='Output files will be stored in a directory of the above name, within the experiment dir.')
+                        help='Optional. Output files will be stored in [output-dir]/[analysis-version] if set.')
     parser.add_argument('--dry-run', action='store_true', default=False,
                         help='Tries to validate all the options specified without actually running anything. ' 
                              'Not guaranteed to spot all issues.')
@@ -910,6 +917,9 @@ if __name__ == '__main__':
 
     # validate and process arguments
     args = process_arguments(config_file_args)
+    print('args = ', args)
+    return args
 
-    run_analyses(**args)
+if __name__ == '__main__':
+    run_analyses(**parse_args())
 

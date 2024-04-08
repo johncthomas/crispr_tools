@@ -15,6 +15,8 @@ from functools import partial
 # make it easy to find print statements used for debugging
 debugprint = print
 
+from crispr_tools.tools import maybe_its_gz
+
 import logging
 LOG = logging.getLogger(__name__, )
 LOG.setLevel(logging.INFO) # need to set the logger to the lowest level...
@@ -456,10 +458,11 @@ def map_counts(fn_or_dir:Union[str, List[str]], lib:Union[str, pd.DataFrame],
 
     if type(lib) in (str, PosixPath, WindowsPath):
         lib = str(lib)
-        if lib.endswith('.csv'):
+        if lib.endswith('.csv') or lib.endswith('.csv.gz'):
             sep = ','
         else:
             sep = '\t'
+        lib = maybe_its_gz(lib)
         lib = pd.read_csv(lib, sep=sep)
 
     for hdr in (seqhdr, guidehdr, genehdr):
@@ -569,6 +572,10 @@ if __name__ == '__main__':
     if clargs.library:
         if not os.path.isfile(clargs.library):
             raise RuntimeError(f"Library file not found: {clargs.library}")
+
+        lib = pd.read_csv(clargs.library, index_col=clargs.guidehdr)
+        if lib.index.duplicated().any():
+            print('WARNING: Duplicated guide names found in library, first one will be kept, all others discarded.')
 
     assert all([os.path.isfile(f) for f in clargs.files])
 

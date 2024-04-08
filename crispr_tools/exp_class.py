@@ -4,7 +4,7 @@ import numpy as np
 from typing import Union, List, Dict
 import yaml
 from crispr_tools.tools import tabulate_mageck, tabulate_drugz, size_factor_normalise
-from attrdict import AttrDict
+from attrdictionary import AttrDict
 import os
 from crispr_tools.crispr_pipeline import process_control_map
 from crispr_tools.tools import clonal_lfcs
@@ -31,10 +31,10 @@ class CrisprExperiment:
             expd = yaml.load(open(expd))
 
         if isStr(count):
-            count = pd.read_csv(count, '\t', index_col=0)
+            count = pd.read_csv(count, sep='\t', index_col=0)
 
         self.count = count
-        self.countng = count.drop('gene', 1)
+        self.countng = count.drop('gene', axis=1)
 
         self.sample_replicates = expd['sample_reps']
         self.samples = self.sample_replicates.keys()
@@ -77,11 +77,11 @@ class CrisprExperiment:
             res[grp] = tabulate_mageck(f"{prefix}.{grp}.")
         self.results['mageck'] = res
 
-    def add_jacks(self, prefix):
-        res = AttrDict()
-        for grp in self.controls.keys():
-            res[grp] = tabulate_score(f"{prefix}.{grp}.")
-        self.results['jacks'] = res
+    # def add_jacks(self, prefix):
+    #     res = AttrDict()
+    #     for grp in self.controls.keys():
+    #         res[grp] = tabulate_score(f"{prefix}.{grp}.")
+    #     self.results['jacks'] = res
 
     def add_results(self, expd=None):
         """Add analysis results from mageck or jacks, using info specified in
@@ -95,9 +95,9 @@ class CrisprExperiment:
             prefix = os.path.join(p, 'mageck', 'files', f"{expd['file_prefix']}")
             self.add_mageck(prefix)
 
-        if 'skip_jacks' not in expd or not expd['skip_jacks']:
-            prefix = os.path.join(p, 'jacks_median', 'files', f"{expd['file_prefix']}")
-            self.add_jacks(prefix)
+        # if 'skip_jacks' not in expd or not expd['skip_jacks']:
+        #     prefix = os.path.join(p, 'jacks_median', 'files', f"{expd['file_prefix']}")
+        #     self.add_jacks(prefix)
 
 # def load_exp_from_expd(expd: Union[str, bytes, os.PathLike, Dict, AttrDict], root_dir='./'):
 #     if type(expd) is (str, bytes, os.PathLike):
