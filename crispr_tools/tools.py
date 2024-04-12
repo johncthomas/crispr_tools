@@ -1,7 +1,7 @@
 import os, itertools
 import numpy as np
 from scipy import stats
-
+import re
 
 
 from typing import List, Union, Dict, Collection, Iterable, Tuple
@@ -137,8 +137,6 @@ hart_list = ['AARS1', 'ABCE1', 'ABCF1', 'ACTB', 'ACTL6A', 'ACTR10', 'ACTR2',
 
 hart_list = pd.Series(hart_list, index=hart_list)
 
-__version__ = 'v1.4.1'
-
 # import logging
 # slowvolcLOG = logging.getLogger('slow_volc')
 # slowvolcLOG.setLevel(logging.DEBUG)
@@ -147,12 +145,12 @@ __version__ = 'v1.4.1'
 # Adding Mageck tab
 # fixed plot volcanos enrichment labeling
 
+def is_olfactory(gene_symbol):
+    m = re.match('^OR\\d+[a-zA-Z]+\\d+$', gene_symbol)
+    if m is None:
+        return False
+    return True
 
-
-
-#todo; pass plot_volcano a filen string and it loads the table
-# todo standardised tables for all results that allow you to pull out x, y wiht same sample and score keys
-import pkg_resources
 
 def list_not_str(thing):
     """If thing is a string, wrap it in a list."""
