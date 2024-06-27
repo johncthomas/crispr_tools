@@ -324,7 +324,9 @@ def tabulate_drugz(prefix, compjoiner=ARROW) -> dict[str, pd.DataFrame]:
     for fn in iter_files_by_prefix(prefix):
         # crop the fn removing the filename part of the prefix, and the file extension
         #  this is the comparison
-        comp = fn.split(prefix.stem, 1)[1][:-4].replace('-', compjoiner).replace('.', '')
+        comp = fn.split(prefix.stem, 1)[1]
+        comp = re.sub("\\.tsv.*$", "", comp)
+        comp = comp.replace("-", compjoiner)
 
         tab = pd.read_csv(os.path.join(os.path.split(prefix)[0], fn), sep='\t', index_col=0)
 
