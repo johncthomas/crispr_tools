@@ -208,7 +208,8 @@ def call_drugZ_batch(sample_reps:Dict[str, list],
                      kwargs:dict=None,
                      pseudocount=1,
                      drop_guide_less_than=0,
-                     drop_guide_type=None):
+                     drop_guide_type=None,
+                     overwrite=False):
     """output files written to {file_prefix}.{ctrl}-{treat}.tsv
 
     One file per comparison, in the default drugz format. Use tabulate_drugz to
@@ -268,30 +269,31 @@ def call_drugZ_batch(sample_reps:Dict[str, list],
             )
 
             dzargs.drugz_output_file = f"{prefix}.{ctrl_samp}-{treat_samp}.tsv".replace('//', '/')
+            if overwrite or not file_exists_or_zero(maybe_its_gz(dzargs.drugz_output_file)):
+
+                if drop_guide_less_than:
+                    reps = list_not_str(sample_reps[ctrl_samp]) \
+                           + list_not_str(sample_reps[treat_samp])
             
-            if file_exists_or_zero(dzargs.drugz_output_file):
-                os.remove(dzargs.drugz_output_file)
-
-            if drop_guide_less_than:
-                reps = list_not_str(sample_reps[ctrl_samp]) \
-                       + list_not_str(sample_reps[treat_samp])
-
-                cnt_lessthan = (cnt.loc[:, reps] < drop_guide_less_than)
-                # if add more types here, add new keywords to assertion at top of func
-                if drop_guide_type == 'any':
-                    bad_guides = cnt_lessthan.any(1)
-                #elif drop_guide_type in ('both', 'all'):
-                else:
-                     bad_guides = cnt_lessthan.all(1)
-
-                cnt.loc[~bad_guides, ['gene']+reps].to_csv(tmpfn, sep='\t')
-                pipeLOG.info(
-                    f"call_drugZ_batch: {sum(bad_guides)} guides removed "
-                    f"from {ctrl_samp}-{treat_samp}, using less than {drop_guide_less_than} "
-                    f"with '{drop_guide_type}' method."
-                )
-
-            drugZ_analysis(dzargs)
+                    cnt_lessthan = (cnt.loc[:, reps] < drop_guide_less_than)
+                    # if add more types here, add new keywords to assertion at top of func
+                    if drop_guide_type == 'any':
+                        bad_guides = cnt_lessthan.any(1)
+                    #elif drop_guide_type in ('both', 'all'):
+                    else:
+                         bad_guides = cnt_lessthan.all(1)
+            
+                    cnt.loc[~bad_guides, ['gene']+reps].to_csv(tmpfn, sep='\t')
+                    pipeLOG.info(
+                        f"call_drugZ_batch: {sum(bad_guides)} guides removed "
+                        f"from {ctrl_samp}-{treat_samp}, using less than {drop_guide_less_than} "
+                        f"with '{drop_guide_type}' method."
+                    )
+            
+                drugZ_analysis(dzargs)
+            
+            else:
+                pipeLOG.info('Output DrugZ analysis exists: ' + dzargs.drugz_output_file + ". Not running DrugZ.")
 
     if drop_guide_less_than:
         os.remove(tmpfn)
@@ -347,7 +349,8 @@ def call_mageck_batch(sample_reps:Dict[str, list],
                       counts_file:str,
                       prefix:str,
                       kwargs:dict=None,
-                      pseudocount=1,):
+                      pseudocount=1,
+                      overwrite=False):
 
     """Run mageck analyses using comparisons specified in control_map."""
 
@@ -379,11 +382,14 @@ def call_mageck_batch(sample_reps:Dict[str, list],
                 continue
             
             outfn = '{outprefix}.{ctrlnm}-{sampnm}.gene_summary.txt'.format(outprefix=prefix, ctrlnm=ctrl_samp, sampnm=treat)
-            if file_exists_or_zero(outfn):
-                os.remove(outfn)
+            if overwrite or not file_exists_or_zero(maybe_its_gz(outfn)):
+                if file_exists_or_zero(maybe_its_gz(outfn)):
+                    os.remove(maybe_its_gz(outfn))
+                call_mageck(ctrl_samp, treat, sample_reps, counts_file, prefix, kwargs)
+                mageck_pairs_done.append((ctrl_samp, treat))
 
-            call_mageck(ctrl_samp, treat, sample_reps, counts_file, prefix, kwargs)
-            mageck_pairs_done.append((ctrl_samp, treat))
+            else:
+                pipeLOG.info('Output MAGeCK analysis exists: ' + outfn + ". Not running MAGeCK.")
 
 
     # delete the file with additional pseudocount, if there is one.
@@ -666,6 +672,7 @@ def run_analyses(output_dir, file_prefix,
                  counts_file=None,
                  methods_kwargs:Dict=None,
                  dont_log=False,  #todo replace dont_log with some kind of verbosity thing
+                 overwrite=False,
                  compjoiner='-',  #tools.ARROW,
                  notes='',
                  skip_method=None,
@@ -802,7 +809,7 @@ def run_analyses(output_dir, file_prefix,
                 (analysis_method, out_prefix, f"{file_prefix}{labstr}")
             )
             analysis_func = analysis_functions[analysis_method]
-            analysis_func(sample_reps, ctrl_map, curr_counts, out_prefix, curr_kwargs, pseudocount=pseudocount)
+            analysis_func(sample_reps, ctrl_map, curr_counts, out_prefix, curr_kwargs, pseudocount=pseudocount, overwrite=overwrite)
 
         # tabulate the analyses
         for analysis_method, results_prefix, table_file_prefix in list(ran_analyses):
@@ -879,6 +886,8 @@ def parse_args() -> dict:
                              ' JSON. All included by default.')
     parser.add_argument('--dont-log', action='store_true', dest='dont_log', default=None,
                         help="Don't write a log file.")
+    parser.add_argument('--overwrite', action='store_true', default=False,
+                        help="Overwrite existing analysis files if they exist.")
     parser.add_argument('--analysis-version', default=None,
                         help='Optional. Output files will be stored in [output-dir]/[analysis-version] if set.')
     parser.add_argument('--dry-run', action='store_true', default=False,
