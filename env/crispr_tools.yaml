@@ -3,16 +3,11 @@ channels:
   - defaults
   - bioconda
   - conda-forge
+  - main
 dependencies:
+  - python
   - mageck
-  - numpy
-  - python<3.10
-  - scipy
+  - tensorflow
   - pip
-  - spyder
   - pip:
-    - attrdict
-    - matplotlib
-    - pandas
-    - scikit-learn
-    - seaborn
+      - crispr_chronos
