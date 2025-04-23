@@ -182,6 +182,17 @@ class AnalysisWorkbook:
         experiment_dictionary['sample_reps'] = {
             k: list(v.values) for k, v in repdeets.groupby('Sample').groups.items()
         }
+        
+        # days grown and cell line hash - for chronos support
+        experiment_dictionary['days_grown'] = {
+            k: list(v.values) for k, v in repdeets.set_index('Days grown').groupby('Sample').groups.items()
+        }
+            # Produce a hash (not actually a hash) of the treatment, dose, clone, cell line, and knockout.
+            # This is used by chronos to identify which replicates are the same samples but different timepoints
+        repdeets['hash'] = repdeets['Treatment'].astype(str) + repdeets['Dose'].astype(str) + repdeets['Clone'].astype(str) + repdeets['Cell line'].astype(str) + repdeets['KO'].astype(str)
+        experiment_dictionary['cell_line_hash'] = {
+            k: list(v.values) for k, v in repdeets.set_index('hash').groupby('Sample').groups.items()
+        }
 
         # Analyses. Producing a list of dicts with "method" and "groups":List
         #   required keys. Should practically always be a fn_counts, but ignore
