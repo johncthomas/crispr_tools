@@ -62,7 +62,7 @@ pipeLOG.setLevel(logging.INFO)
 
 #from crispr_tools.count_reads import count_reads, count_batch, map_counts
 #from crispr_tools.tools import plot_read_violins, plot_ROC, plot_volcano, tabulate_mageck, tabulate_drugz
-from crispr_tools.tools import tabulate_mageck, tabulate_drugz
+from crispr_tools.tools import tabulate_mageck, tabulate_drugz, tabulate_chronos
 #from crispr_tools.jacks_tools import tabulate_score, scores_scatterplot, mahal_nocov
 from crispr_tools.version import __version__
 
@@ -202,13 +202,16 @@ def write_repmap(sample_reps:Dict[str, list], ctrlmap:Dict[str, list], repmap_fn
 
 
 def call_drugZ_batch(sample_reps:Dict[str, list],
+                     days_grown:Dict[str, list],
+                     cell_line_hash:Dict[str, list],
                      control_map:Dict[str, list],
                      counts_file:str,
                      prefix:str,
                      kwargs:dict=None,
                      pseudocount=1,
                      drop_guide_less_than=0,
-                     drop_guide_type=None):
+                     drop_guide_type=None,
+                     overwrite=False):
     """output files written to {file_prefix}.{ctrl}-{treat}.tsv
 
     One file per comparison, in the default drugz format. Use tabulate_drugz to
@@ -268,30 +271,31 @@ def call_drugZ_batch(sample_reps:Dict[str, list],
             )
 
             dzargs.drugz_output_file = f"{prefix}.{ctrl_samp}-{treat_samp}.tsv".replace('//', '/')
+            if overwrite or not file_exists_or_zero(maybe_its_gz(dzargs.drugz_output_file)):
+
+                if drop_guide_less_than:
+                    reps = list_not_str(sample_reps[ctrl_samp]) \
+                           + list_not_str(sample_reps[treat_samp])
             
-            if file_exists_or_zero(dzargs.drugz_output_file):
-                os.remove(dzargs.drugz_output_file)
-
-            if drop_guide_less_than:
-                reps = list_not_str(sample_reps[ctrl_samp]) \
-                       + list_not_str(sample_reps[treat_samp])
-
-                cnt_lessthan = (cnt.loc[:, reps] < drop_guide_less_than)
-                # if add more types here, add new keywords to assertion at top of func
-                if drop_guide_type == 'any':
-                    bad_guides = cnt_lessthan.any(1)
-                #elif drop_guide_type in ('both', 'all'):
-                else:
-                     bad_guides = cnt_lessthan.all(1)
-
-                cnt.loc[~bad_guides, ['gene']+reps].to_csv(tmpfn, sep='\t')
-                pipeLOG.info(
-                    f"call_drugZ_batch: {sum(bad_guides)} guides removed "
-                    f"from {ctrl_samp}-{treat_samp}, using less than {drop_guide_less_than} "
-                    f"with '{drop_guide_type}' method."
-                )
-
-            drugZ_analysis(dzargs)
+                    cnt_lessthan = (cnt.loc[:, reps] < drop_guide_less_than)
+                    # if add more types here, add new keywords to assertion at top of func
+                    if drop_guide_type == 'any':
+                        bad_guides = cnt_lessthan.any(1)
+                    #elif drop_guide_type in ('both', 'all'):
+                    else:
+                         bad_guides = cnt_lessthan.all(1)
+            
+                    cnt.loc[~bad_guides, ['gene']+reps].to_csv(tmpfn, sep='\t')
+                    pipeLOG.info(
+                        f"call_drugZ_batch: {sum(bad_guides)} guides removed "
+                        f"from {ctrl_samp}-{treat_samp}, using less than {drop_guide_less_than} "
+                        f"with '{drop_guide_type}' method."
+                    )
+            
+                drugZ_analysis(dzargs)
+            
+            else:
+                pipeLOG.info('Output DrugZ analysis exists: ' + dzargs.drugz_output_file + ". Not running DrugZ.")
 
     if drop_guide_less_than:
         os.remove(tmpfn)
@@ -343,11 +347,14 @@ def call_mageck(control_samp:str, treat_samp:str, sample_reps:Dict[str, List[str
 # CALL SIGNATURE MUST MATCH CALL JACKS and any others
 #todo one function/class as wrapper for all analysis methods
 def call_mageck_batch(sample_reps:Dict[str, list],
+                      days_grown:Dict[str, list],
+                      cell_line_hash:Dict[str, list],
                       control_map:Dict[str, list],
                       counts_file:str,
                       prefix:str,
                       kwargs:dict=None,
-                      pseudocount=1,):
+                      pseudocount=1,
+                      overwrite=False):
 
     """Run mageck analyses using comparisons specified in control_map."""
 
@@ -379,24 +386,134 @@ def call_mageck_batch(sample_reps:Dict[str, list],
                 continue
             
             outfn = '{outprefix}.{ctrlnm}-{sampnm}.gene_summary.txt'.format(outprefix=prefix, ctrlnm=ctrl_samp, sampnm=treat)
-            if file_exists_or_zero(outfn):
-                os.remove(outfn)
+            if overwrite or not file_exists_or_zero(maybe_its_gz(outfn)):
+                if file_exists_or_zero(maybe_its_gz(outfn)):
+                    os.remove(maybe_its_gz(outfn))
+                call_mageck(ctrl_samp, treat, sample_reps, counts_file, prefix, kwargs)
+                mageck_pairs_done.append((ctrl_samp, treat))
 
-            call_mageck(ctrl_samp, treat, sample_reps, counts_file, prefix, kwargs)
-            mageck_pairs_done.append((ctrl_samp, treat))
+            else:
+                pipeLOG.info('Output MAGeCK analysis exists: ' + outfn + ". Not running MAGeCK.")
 
 
     # delete the file with additional pseudocount, if there is one.
     if tmp_fn is not None:
         os.remove(tmp_fn)
 
+def call_chronos_batch(sample_reps:Dict[str, list],
+                       days_grown:Dict[str, list],
+                       cell_line_hash:Dict[str, list],
+                       control_map:Dict[str, list],
+                       counts_file:str,
+                       prefix:str,
+                       kwargs:dict=None,
+                       pseudocount=1,
+                       overwrite=False):
+    
+    import chronos
+    import math
+    # read in counts
+    counts = pd.read_csv(counts_file, sep = "\t")    
+    
+    # apply pseudocount
+    if (pseudocount > 1):
+        num_cols = counts.dtypes != object
+        counts.loc[:, num_cols] += pseudocount
+   
+    # chronos format counts
+    readcounts = counts.drop(counts.columns[1], axis=1).set_index(counts.columns[0]).transpose().reset_index()
+    readcounts.rename(columns = {readcounts.columns[0]: "sequence_ID"}, inplace = True)
+    
+    # chronos format library
+    guidemap = pd.DataFrame()
+    guidemap['sgrna'] = counts.iloc[:,0]
+    guidemap['gene'] = counts.iloc[:,1]
+    negctrls = pd.DataFrame()
+    negctrls['sgrna'] = counts.iloc[:,0]
+    # Use the design non-targeting and cutting controls in the first instance
+    negctrls = negctrls[negctrls['sgrna'].str.match('.*(?<!exo_)Non-targeting.*|.*_OR\d.*|.*_Cutting\d.*')]
+    negctrls = negctrls["sgrna"]
+    # Use the exorcise missed targets if there were no controls in the design
+    if(len(negctrls) == 0):
+        negctrls = pd.DataFrame()
+        negctrls['sgrna'] = counts.iloc[:,0]
+        negctrls = negctrls[negctrls['sgrna'].str.match('.*Non-targeting.*|.*_OR\d.*|.*_Cutting\d.*')]
+        negctrls = negctrls["sgrna"]
+    
+    # chronos format sample metadata
+    sa = pd.DataFrame(pd.DataFrame.from_dict(sample_reps, orient = "index").unstack()).reset_index().drop("level_0", axis = 1).rename(columns = {"level_1": "sample", 0: "sequence_ID"})
+    sa = sa.loc[[s is not None for s in sa['sequence_ID']]]
+    da = pd.DataFrame(pd.DataFrame.from_dict(days_grown, orient = "index").unstack()).reset_index().drop("level_0", axis = 1).rename(columns = {"level_1": "sample", 0: "days"})
+    da['days'] = da['days'].astype(float)
+    da = da.loc[[d is not None and not math.isnan(d) for d in da['days']]]
+    ha = pd.DataFrame(pd.DataFrame.from_dict(cell_line_hash, orient = "index").unstack()).reset_index().drop("level_0", axis = 1).rename(columns = {"level_1": "sample", 0: "cell_line_name"})
+    ha = ha.loc[[h is not None for h in ha['cell_line_name']]]
+    ha['cell_line_name'] = ha['cell_line_name'].astype(str)
+    sequencemap = sa.merge(da, on = "sample", how = "left").drop_duplicates()
+    sequencemap = sequencemap.merge(ha, on = "sample", how = "left").drop_duplicates()
+    sequencemap["pDNA_batch"] = 0
+    
+    # loop through each fromstart contrast
+    for k in control_map:
+        v = [k] + control_map[k]
+        # get the current sequencemap for this contrast
+        this_sequencemap = sequencemap[sequencemap['sample'].isin(v)]
+        this_sequencemap.loc[this_sequencemap['sample'] == k, 'cell_line_name'] = "pDNA"
+        # stop if this is not a fromstart contrast
+        this_timepoints = set(this_sequencemap['days'])
+        if len(this_timepoints) == 1:
+            pipeLOG.info('Not a valid Chronos control because all of these samples are from the same timepoint: ' + str(v) + ". Not running Chronos.")
+            continue
+        # stop if the pDNA sample is later than any of the other samples
+        this_pDNA_timepoint = set(this_sequencemap.loc[this_sequencemap["cell_line_name"] == "pDNA", "days"])
+        if min(this_timepoints) != min(this_pDNA_timepoint):
+            pipeLOG.info('Not a valid Chronos control because the control sample is not from the earliest timepoint: ' + str(v) + ". Not running Chronos.")
+            continue
+        # proceed if it is a fromstart contrast and we haven't run it before
+        this_prefix = prefix + "." + k
+        if overwrite or not file_exists_or_zero(maybe_its_gz(this_prefix + "/gene_effect.hdf5")):
+            # initial screen delay is the earliest timepoint
+            this_initial_screen_delay = min(this_timepoints)
+            # remove cell lines with no replicates after the pDNA sample
+            this_other_early_timepoints = this_sequencemap.loc[this_sequencemap["days"] <= this_initial_screen_delay, "cell_line_name"]
+            this_other_early_timepoints = this_other_early_timepoints.loc[this_other_early_timepoints != "pDNA"]
+            for e in this_other_early_timepoints:
+                this_other_early_timepoint = this_sequencemap.loc[this_sequencemap["cell_line_name"] == e, "days"]
+                if not (any([r > this_initial_screen_delay for r in this_other_early_timepoint])):
+                    this_sequencemap = this_sequencemap.loc[this_sequencemap["cell_line_name"] != e]
+            
+            # remove outgrowths
+            this_readcounts = readcounts[readcounts['sequence_ID'].isin(this_sequencemap["sequence_ID"])].set_index("sequence_ID")
+            chronos.nan_outgrowths(this_readcounts, this_sequencemap, guidemap)
+            # do chronos
+            try: 
+                model = chronos.Chronos(
+                    readcounts = {"default": this_readcounts},
+                    sequence_map = {"default": this_sequencemap},
+                    guide_gene_map = {"default": guidemap},
+                    negative_control_sgrnas = {"default": negctrls},
+                    initial_screen_delay = this_initial_screen_delay)
+            except Exception as exc:
+                pipeLOG.info(exc)
+                pipeLOG.info("Couldn't do it: " + str(k) + ". Not running Chronos.")
+                continue 
+            model.train()
+            # save output
+            os.makedirs(this_prefix, exist_ok = True)
+            model.save(this_prefix, overwrite = True)
+        # tell the user that we skipped it if the analysis already exists
+        else:
+            pipeLOG.info('Output Chronos analysis exists: ' + this_prefix + ". Not running Chronos.")
+        
+    
+
 # When adding new functions, need to deal with pseudocount option in the main func
 #   and pairedness in the AnalysisWorkbook
 def dry_function(*args, **kwargs):
     pass
 
-analysis_functions = {'mageck':call_mageck_batch, 'drugz':call_drugZ_batch, }
-analysis_tabulate = {'mageck':tabulate_mageck, 'drugz':tabulate_drugz, }
+analysis_functions = {'mageck':call_mageck_batch, 'drugz':call_drugZ_batch, 'chronos':call_chronos_batch}
+analysis_tabulate = {'mageck':tabulate_mageck, 'drugz':tabulate_drugz, 'chronos':tabulate_chronos}
 available_analyses = analysis_functions.keys()
 analysis_functions['dry'] = dry_function
 analysis_tabulate['dry'] = dry_function
@@ -661,11 +778,14 @@ def process_arguments(arguments:dict, delete_unrequired_args=True) -> dict:
 
 def run_analyses(output_dir, file_prefix,
                  sample_reps:Dict[str, list],
+                 days_grown:Dict[str, list],
+                 cell_line_hash:Dict[str, list],
                  control_groups:Dict[str, Dict[str, list]],
                  analyses:List[dict],
                  counts_file=None,
                  methods_kwargs:Dict=None,
                  dont_log=False,  #todo replace dont_log with some kind of verbosity thing
+                 overwrite=False,
                  compjoiner='-',  #tools.ARROW,
                  notes='',
                  skip_method=None,
@@ -802,11 +922,11 @@ def run_analyses(output_dir, file_prefix,
                 (analysis_method, out_prefix, f"{file_prefix}{labstr}")
             )
             analysis_func = analysis_functions[analysis_method]
-            analysis_func(sample_reps, ctrl_map, curr_counts, out_prefix, curr_kwargs, pseudocount=pseudocount)
+            analysis_func(sample_reps, days_grown, cell_line_hash, ctrl_map, curr_counts, out_prefix, curr_kwargs, pseudocount=pseudocount, overwrite=overwrite)
 
         # tabulate the analyses
         for analysis_method, results_prefix, table_file_prefix in list(ran_analyses):
-            tab = analysis_tabulate[analysis_method](results_prefix, compjoiner)
+            tab = analysis_tabulate[analysis_method](results_prefix, cell_line_hash, compjoiner)
             tabfn = str(os.path.join(output_dir, 'tables', f'{table_file_prefix}.{analysis_method}_table.csv'))
             pipeLOG.info(f'writing table: {tabfn}')
             if not dry_run:
@@ -879,6 +999,8 @@ def parse_args() -> dict:
                              ' JSON. All included by default.')
     parser.add_argument('--dont-log', action='store_true', dest='dont_log', default=None,
                         help="Don't write a log file.")
+    parser.add_argument('--overwrite', action='store_true', default=False,
+                        help="Overwrite existing analysis files if they exist.")
     parser.add_argument('--analysis-version', default=None,
                         help='Optional. Output files will be stored in [output-dir]/[analysis-version] if set.')
     parser.add_argument('--dry-run', action='store_true', default=False,
